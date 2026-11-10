@@ -30,7 +30,7 @@ public final class MainActivity extends Activity {
     private FrameHub frames;
     private MjpegServer server;
     private volatile boolean streaming;
-    private long lastEncoded, previewSequence;
+    private long nextEncodeAt, previewSequence;
     private int rotation;
     private long generation;
     private final String sessionToken = MjpegServer.newToken();
@@ -82,7 +82,7 @@ public final class MainActivity extends Activity {
         final long current = ++generation;
         try {
             frames = new FrameHub(); server = new MjpegServer(frames, sessionPort, sessionToken); sessionPort = server.port();
-            streaming = true; lastEncoded = 0; previewSequence = 0;
+            streaming = true; nextEncodeAt = 0; previewSequence = 0;
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             start.setText("송출 중지 / Stop"); copy.setEnabled(true);
             rate.setEnabled(false);
@@ -143,8 +143,10 @@ public final class MainActivity extends Activity {
         try (Image image = source.acquireLatestImage()) {
             if (image == null || !streaming) return;
             long now = System.nanoTime();
-            if (now - lastEncoded < 1_000_000_000L / targetFps) return; // Bound CPU and drop old frames.
-            lastEncoded = now;
+            if (now < nextEncodeAt) return;
+            // Keep cadence across camera jitter rather than anchoring every
+            // deadline to the last arrival (which can halve a nominal 30fps feed).
+            nextEncodeAt = Math.max(nextEncodeAt + 1_000_000_000L / targetFps, now);
             Image.Plane[] p = image.getPlanes();
             byte[] nv21 = Yuv420.nv21(image.getWidth(), image.getHeight(),
                     new ByteBuffer[]{p[0].getBuffer(),p[1].getBuffer(),p[2].getBuffer()},
