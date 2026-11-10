@@ -1,0 +1,50 @@
+name: Publish phase 01 release
+
+# Dispatch only AFTER the PR is merged. Tests run again on the exact release SHA.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-01-release
+  cancel-in-progress: false
+
+jobs:
+  verify-target:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+  tests:
+    needs: verify-target
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python scripts/package_release.py
+      - name: Publish source release without overwriting an existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.1.0 >/dev/null 2>&1; then
+            echo "v0.1.0 already exists; refusing to replace it."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin refs/tags/v0.1.0; then
+            echo "v0.1.0 tag already exists; inspect its target before publishing."
+            exit 1
+          fi
+          gh release create v0.1.0 dist/phase-01-camera-stream-v0.1.0.zip \
+            --target "$GITHUB_SHA" --title "Phase 01 - Dual Camera Streaming" \
+            --notes-file docs/releases/v0.1.0.md
