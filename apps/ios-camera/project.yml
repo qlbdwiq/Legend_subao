@@ -1,0 +1,33 @@
+name: DroneCamera
+options:
+  bundleIdPrefix: com.dronecollision
+  deploymentTarget:
+    iOS: '16.0'
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    TARGETED_DEVICE_FAMILY: '1,2'
+targets:
+  DroneCamera:
+    type: application
+    platform: iOS
+    sources: [DroneCamera]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dronecollision.camera
+        MARKETING_VERSION: 0.2.0
+        CURRENT_PROJECT_VERSION: 2
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: DroneCamera/Info.plist
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets: [DroneCameraTests]
+  DroneCameraTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [DroneCameraTests]
+    dependencies:
+      - target: DroneCamera
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES

@@ -3,6 +3,13 @@
 두 영상만 수신·표시하는 데스크톱 프로그램입니다. iPhone/iPad/Android의 스트리밍 앱,
 USB 웹캠, 로컬 동영상을 혼합해 사용할 수 있습니다. LiDAR·YOLO·3D·충돌 경고는 포함하지 않습니다.
 
+`v0.2.0`부터 자체 **Drone Camera** 앱과 휴대폰 USB 연결을 지원합니다.
+[Android APK·iPhone 무료 계정 설치 및 Wi-Fi/USB 안내](../../docs/mobile/README.md)를 먼저 참고하세요.
+설정의 입력 종류 `usb`는 기존 **USB 웹캠 번호**입니다. 휴대폰 케이블 연결은 입력 종류 `mjpeg`와
+별도의 **연결 방식 Android USB/iPhone USB** 또는 **유선 USB 연결 도우미**를 사용합니다.
+휴대폰의 원래 URL·USB 방식·장치 번호를 저장하고, PC의 임시 전달 포트는 실행마다 다시 만듭니다.
+예전 설정 파일에서 새 `usb_platform`, `usb_serial` 필드를 생략하면 기존 방식으로 동작합니다.
+
 ## Windows 설치 및 실행
 
 Python.org의 **Python 3.11 또는 3.12 x86-64**를 설치합니다. PowerShell에서 저장소 루트로 이동하여:

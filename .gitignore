@@ -22,3 +22,16 @@ test-results.xml
 *.mkv
 .DS_Store
 Thumbs.db
+.gradle/
+local.properties
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+*.ipa
+*.apk
+*.xcresult/
+DerivedData/
+xcuserdata/
+mobile-dist/
+apps/ios-camera/DroneCamera.xcodeproj/

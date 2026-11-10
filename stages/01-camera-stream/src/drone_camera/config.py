@@ -24,6 +24,8 @@ class CameraConfig:
     reconnect_delay_seconds: float = 2.0
     max_reconnect_attempts: int = 5
     loop_file: bool = False
+    usb_platform: str = ""
+    usb_serial: str = ""
 
     def __post_init__(self):
         if self.id not in ("camera-01", "camera-02"):
@@ -57,6 +59,16 @@ class CameraConfig:
             raise ConfigError("Reconnect attempts must be an integer from 0 to 100.")
         if type(self.auto_reconnect) is not bool or type(self.loop_file) is not bool:
             raise ConfigError("Reconnect and file loop settings must be booleans.")
+        if self.usb_platform not in ("", "android", "ios") or not isinstance(self.usb_serial, str) or len(self.usb_serial) > 128:
+            raise ConfigError("USB platform/serial settings are invalid.")
+        if self.usb_platform:
+            from .usb import UsbError, companion_url
+            if self.input_type != "mjpeg":
+                raise ConfigError("Phone USB forwarding requires the MJPEG input type.")
+            try:
+                companion_url(str(self.source))
+            except UsbError:
+                raise ConfigError("Phone USB requires a valid companion app URL.") from None
 
 
 def defaults() -> list[CameraConfig]:
