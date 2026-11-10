@@ -18,6 +18,10 @@ import SwiftUI
                     }.buttonStyle(.borderedProminent)
                     Button("연결 주소 복사 / Copy URL") { UIPasteboard.general.string = camera.url }
                         .buttonStyle(.bordered).disabled(camera.url.isEmpty)
+                    Picker("송출 FPS", selection: $camera.targetFps) {
+                        Text("15 FPS").tag(15)
+                        Text("30 FPS").tag(30)
+                    }.pickerStyle(.segmented).frame(width: 160).disabled(camera.running)
                     Text("USB: 데스크톱의 USB 연결 도우미 사용").font(.caption)
                 }
             }.padding().foregroundStyle(.white).background(Color(red: 0.067, green: 0.094, blue: 0.153))

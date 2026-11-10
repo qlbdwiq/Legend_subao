@@ -1,7 +1,7 @@
 # Drone Camera — Android / Galaxy
 
 Camera2 후면 카메라 → YUV stride 보정 → JPEG → 인증된 HTTP MJPEG 송출 앱입니다.
-Android 8.0(API 26)+, 최대 1280×720 / 15fps, 최대 2클라이언트, 최신 프레임 한 장을 유지합니다.
+Android 8.0(API 26)+, 최대 1280×720 / 30fps (15fps 선택 가능), 최대 2클라이언트, 최신 프레임 한 장을 유지합니다.
 UI 미리보기는 별도 최신 프레임을 약 10Hz로 표시합니다. 성능은 실제 장치에서 확인해야 합니다.
 
 Wi-Fi 또는 데스크톱의 Android USB 도우미로 연결합니다. 설치·연결·권한 안내는

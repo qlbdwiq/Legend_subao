@@ -90,6 +90,6 @@ CI는 PR과 `main` push에 Windows/macOS Python 3.11·3.12 및 macOS Intel 3.11 
 
 로컬 합성 영상·MJPEG 테스트나 CI 통과는 실제 iPhone/Android 스트림, USB 드라이버 또는
 모든 Windows/macOS 장비에서의 성능을 보장하지 않습니다. 수신기의 720p30 두 채널은 실장비 검증 목표이며,
-현재 자체 모바일 앱 송출은 CPU·발열을 고려하여 최대 720p15를 목표로 합니다.
+현재 자체 모바일 앱 송출은 CPU·발열을 고려하여 최대 720p30을 목표로 하며 부하를 낮추는 15fps 선택을 제공합니다.
 
 라이선스: [MIT](LICENSE). 향후 계획: [로드맵](docs/roadmap.md).

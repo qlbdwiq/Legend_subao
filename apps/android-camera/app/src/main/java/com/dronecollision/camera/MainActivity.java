@@ -20,7 +20,7 @@ import java.util.*;
 public final class MainActivity extends Activity {
     private TextView status, address;
     private ImageView preview;
-    private Button start, copy;
+    private Button start, copy, rate;
     private HandlerThread cameraThread;
     private Handler cameraHandler;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -35,6 +35,7 @@ public final class MainActivity extends Activity {
     private long generation;
     private final String sessionToken = MjpegServer.newToken();
     private int sessionPort;
+    private volatile int targetFps = 30;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -60,7 +61,9 @@ public final class MainActivity extends Activity {
         start = new Button(this); start.setText("송출 시작 / Start"); start.setOnClickListener(v -> { if (streaming) stop("송출 중지"); else requestCamera(); });
         copy = new Button(this); copy.setText("연결 주소 복사 / Copy URL"); copy.setEnabled(false);
         copy.setOnClickListener(v -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Drone Camera URL", address.getText())));
-        actions.addView(start); actions.addView(copy); column.addView(actions);
+        rate = new Button(this); rate.setText("30 FPS");
+        rate.setOnClickListener(v -> { targetFps = targetFps == 30 ? 15 : 30; rate.setText(targetFps+" FPS"); });
+        actions.addView(start); actions.addView(copy); actions.addView(rate); column.addView(actions);
         setContentView(column);
     }
     private void requestCamera() {
@@ -82,6 +85,7 @@ public final class MainActivity extends Activity {
             streaming = true; lastEncoded = 0; previewSequence = 0;
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             start.setText("송출 중지 / Stop"); copy.setEnabled(true);
+            rate.setEnabled(false);
             address.setText(server.url(wifiAddress()));
             status.setText("연결 중 · URL을 데스크톱에 입력 · USB는 연결 도우미 사용");
             cameraThread = new HandlerThread("camera-encoder"); cameraThread.start();
@@ -94,6 +98,10 @@ public final class MainActivity extends Activity {
             }
             if (id == null) throw new IllegalStateException("No rear camera");
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
+            Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+            Range<Integer> frameRate = ranges == null ? null : Arrays.stream(ranges)
+                    .filter(r -> r.getLower() <= targetFps && r.getUpper() >= targetFps)
+                    .min(Comparator.comparingInt(r -> Math.abs(r.getUpper()-targetFps)+Math.abs(r.getLower()-targetFps))).orElse(null);
             Size[] sizes = Objects.requireNonNull(characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)).getOutputSizes(ImageFormat.YUV_420_888);
             Size size = Arrays.stream(sizes).filter(s -> s.getWidth() <= 1280 && s.getHeight() <= 720 && s.getWidth()%2==0 && s.getHeight()%2==0)
                     .max(Comparator.comparingInt(s -> s.getWidth()*s.getHeight())).orElseThrow(() -> new IllegalStateException("No supported size"));
@@ -115,8 +123,9 @@ public final class MainActivity extends Activity {
                                     CaptureRequest.Builder request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
                                     request.addTarget(reader.getSurface());
                                     request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+                                    if (frameRate != null) request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, frameRate);
                                     configured.setRepeatingRequest(request.build(), null, cameraHandler);
-                                    ui.post(() -> status.setText(size.getWidth()+" × "+size.getHeight()+" · MJPEG 최대 15 FPS · 앱을 열린 상태로 유지"));
+                                    ui.post(() -> status.setText(size.getWidth()+" × "+size.getHeight()+" · MJPEG 최대 "+targetFps+" FPS · 앱을 열린 상태로 유지"));
                                 } catch (CameraAccessException | IllegalStateException e) { if (generation == current) failed(); }
                             }
                             @Override public void onConfigureFailed(CameraCaptureSession ignored) { if (generation == current) failed(); }
@@ -134,7 +143,7 @@ public final class MainActivity extends Activity {
         try (Image image = source.acquireLatestImage()) {
             if (image == null || !streaming) return;
             long now = System.nanoTime();
-            if (now - lastEncoded < 66_666_667) return; // Bound CPU and drop old frames.
+            if (now - lastEncoded < 1_000_000_000L / targetFps) return; // Bound CPU and drop old frames.
             lastEncoded = now;
             Image.Plane[] p = image.getPlanes();
             byte[] nv21 = Yuv420.nv21(image.getWidth(), image.getHeight(),
@@ -193,7 +202,7 @@ public final class MainActivity extends Activity {
         if (frames != null) { frames.close(); frames = null; }
         cameraThread = null; cameraHandler = null;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        start.setText("송출 시작 / Start"); copy.setEnabled(false); address.setText("");
+        start.setText("송출 시작 / Start"); copy.setEnabled(false); rate.setEnabled(true); address.setText("");
         preview.setImageDrawable(null); status.setText(message);
     }
     @Override protected void onPause() { stop("앱이 백그라운드로 이동하여 송출을 중지했습니다."); super.onPause(); }
