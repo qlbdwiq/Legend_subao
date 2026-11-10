@@ -11,6 +11,8 @@ permissions:
   contents: read
 
 jobs:
+  mobile:
+    uses: ./.github/workflows/mobile.yml
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     strategy:
