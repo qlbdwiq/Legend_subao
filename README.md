@@ -49,7 +49,11 @@ Android는 개발용 서명 APK, iPhone은 무료 Apple 계정으로 직접 설�
 내려받아 더블클릭하고 설정에서 카메라를 연결하세요. [EXE 사용 설명](docs/windows-exe.md).
 Python·OpenCV·Qt와 Android USB용 adb를 포함합니다. 기기 USB 드라이버·권한 승인은 필요합니다.
 
-아래 Python 설치는 **소스 개발 또는 macOS 실행**용입니다.
+**macOS 사용자는 Python 설치 없이 DMG를 사용할 수 있습니다.** 최신 [릴리즈](https://github.com/qlbdwiq/Legend_subao/releases/latest)에서
+Apple Silicon은 `…-macos-arm64.dmg`, Intel Mac은 `…-macos-x64.dmg`를 받으세요.
+Developer ID 서명·공증이 없어 첫 실행에 보안 경고가 나올 수 있습니다. [설치·해결 방법](docs/macos-app.md).
+
+아래 Python 설치는 **소스 개발**용입니다.
 
 Python **3.11 또는 3.12**를 권장합니다. Windows 10/11 x86-64, macOS Apple Silicon 및
 Intel을 대상으로 같은 소스를 사용합니다. CPU만 필요하며 CUDA는 사용하지 않습니다.
@@ -91,7 +95,7 @@ CI는 PR과 `main` push에 Windows/macOS Python 3.11·3.12 및 macOS Intel 3.11 
 컴파일 및 서명 전 IPA·Xcode 프로젝트 생성을 추가로 수행합니다.
 
 [GitHub Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 게시된 버전을 확인할 수 있습니다.
-`v0.2.1`은 테스트한 Windows EXE·압축본·소스를 기본 브랜치 전용 워크플로에서 게시합니다.
+`v0.3.0`부터 버전 태그(`vX.Y.Z`)를 푸시하면 테스트를 다시 실행한 뒤 Windows EXE·macOS DMG(arm64/x64)·소스를 한 릴리즈로 게시합니다. `v0.2.1`은 보존됩니다.
 모바일 APK·서명 전 IPA·Xcode 프로젝트는 `v0.2.0` 배포본을 그대로 사용합니다.
 기존 `v0.1.0` 태그와 게시 파일은 보존합니다.
 태그·릴리즈의 실제 게시 상태는 Releases 페이지를 기준으로 하세요. macOS `.app`은 제공하지 않습니다.

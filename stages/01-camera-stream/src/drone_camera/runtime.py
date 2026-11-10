@@ -15,6 +15,11 @@ def adb_executable() -> str | None:
         # temporary extraction directory so exit can clean up the single EXE.
         base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
         return str(stage_tools(bundle, base / "DroneCollisionDetection" / "Tools"))
+    if getattr(sys, "frozen", False) and sys.platform == "darwin":
+        # The macOS .app ships Google's universal (arm64 + x86_64) adb.
+        bundled = Path(sys._MEIPASS) / "platform-tools" / "adb"
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return str(bundled)
     return shutil.which("adb")
 
 

@@ -1,7 +1,11 @@
-name: Publish Windows standalone release
+name: Publish release
 
-# Dispatch only AFTER the PR is merged. Tests run again on the exact release SHA.
+# Publish by pushing a version tag (for example v0.3.0) that points at a commit on
+# the default branch. Tests and Windows/macOS builds run again on that exact commit.
+# Existing releases and tags are never replaced.
 on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
 
 permissions:
@@ -14,19 +18,35 @@ concurrency:
 jobs:
   verify-target:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
-      - name: Require the default branch
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        name: Require tag == package version and a commit on the default branch
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+        run: |
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "Run this workflow by pushing a version tag, not by branch dispatch."; exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          test "$version" = "$(python3 -c "import re;print(re.search(r'__version__ = \"(.+?)\"',open('stages/01-camera-stream/src/drone_camera/__init__.py').read()).group(1))")"
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"
+          test -f "docs/releases/v$version.md"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
   tests:
     needs: verify-target
     uses: ./.github/workflows/ci.yml
   publish:
-    needs: tests
+    needs: [verify-target, tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      VERSION: ${{ needs.verify-target.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,23 +54,34 @@ jobs:
           python-version: '3.11'
       - uses: actions/download-artifact@v4
         with:
-          name: windows-standalone-v0.2.1
+          name: windows-standalone
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*-standalone
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*-checksum
+          path: checksums
+          merge-multiple: true
       - run: python scripts/package_release.py
-      - name: Publish source release without overwriting an existing tag
+      - name: Combine checksums
+        run: |
+          cat checksums/SHA256SUMS-macos-*.txt >> dist/SHA256SUMS.txt
+          cat dist/SHA256SUMS.txt
+      - name: Publish release without overwriting an existing one
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.2.1 >/dev/null 2>&1; then
-            echo "v0.2.1 already exists; refusing to replace it."
-            exit 1
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already exists; refusing to replace it."; exit 1
           fi
-          if git ls-remote --exit-code --tags origin refs/tags/v0.2.1; then
-            echo "v0.2.1 tag already exists; inspect its target before publishing."
-            exit 1
-          fi
-          test -s dist/DroneCollisionDetection-v0.2.1-windows-x64.exe
-          test -s dist/DroneCollisionDetection-v0.2.1-windows-x64.zip
-          gh release create v0.2.1 dist/phase-01-camera-stream-v0.2.1.zip dist/DroneCollisionDetection-* dist/SHA256SUMS.txt \
-            --target "$GITHUB_SHA" --title "Windows Standalone EXE" \
-            --notes-file docs/releases/v0.2.1.md
+          test -s "dist/DroneCollisionDetection-v$VERSION-windows-x64.exe"
+          test -s "dist/DroneCollisionDetection-v$VERSION-windows-x64.zip"
+          test -s "dist/DroneCollisionDetection-v$VERSION-macos-arm64.dmg"
+          test -s "dist/DroneCollisionDetection-v$VERSION-macos-x64.dmg"
+          gh release create "v$VERSION" "dist/phase-01-camera-stream-v$VERSION.zip" dist/DroneCollisionDetection-* dist/SHA256SUMS.txt \
+            --verify-tag --title "$(sed -n 's/^# //p;T;q' "docs/releases/v$VERSION.md")" \
+            --notes-file "docs/releases/v$VERSION.md"

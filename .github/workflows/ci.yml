@@ -13,6 +13,8 @@ permissions:
 jobs:
   windows:
     uses: ./.github/workflows/windows.yml
+  macos-app:
+    uses: ./.github/workflows/macos.yml
   mobile:
     uses: ./.github/workflows/mobile.yml
   test:
@@ -60,4 +62,4 @@ jobs:
         working-directory: .
         run: |
           python scripts/package_release.py
-          python -m zipfile -t dist/phase-01-camera-stream-v0.2.1.zip
+          python -m zipfile -t dist/phase-01-camera-stream-v*.zip

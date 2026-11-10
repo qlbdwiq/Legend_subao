@@ -6,15 +6,18 @@ Run from any working directory: python scripts/package_release.py
 from pathlib import Path
 import zipfile
 import argparse
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = ROOT / "stages" / "01-camera-stream"
+sys.path.insert(0, str(STAGE / "src"))
+from drone_camera import __version__
 
 
-def package(output: Path | None = None, version: str = "0.2.1") -> Path:
+def package(output: Path | None = None, version: str = __version__) -> Path:
     output = output or ROOT / "dist" / f"phase-01-camera-stream-v{version}.zip"
     output.parent.mkdir(parents=True, exist_ok=True)
-    paths = [ROOT / "LICENSE", ROOT / "README.md", ROOT / "docs" / "roadmap.md",
+    paths = [ROOT / "docs" / "macos-app.md", ROOT / "LICENSE", ROOT / "README.md", ROOT / "docs" / "roadmap.md",
              ROOT / "docs" / "releases" / f"v{version}.md",
              ROOT / "docs" / "mobile" / "README.md",
              ROOT / "docs" / "windows-exe.md",
@@ -37,5 +40,5 @@ def package(output: Path | None = None, version: str = "0.2.1") -> Path:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", default="0.2.1", choices=["0.2.1"])
+    parser.add_argument("--version", default=__version__, choices=[__version__])
     package(version=parser.parse_args().version)

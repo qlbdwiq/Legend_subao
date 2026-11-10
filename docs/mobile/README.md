@@ -18,7 +18,7 @@ GitHub [Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 실제
 
 APK는 Play Store용 배포 키가 아닌 CI 개발 키로 서명됩니다. 다른 CI 빌드로 업데이트할 때
 서명이 다르면 기존 앱을 삭제한 뒤 재설치해야 합니다. IPA에 Apple 서명을 위조하거나
-임의 프로비저닝 프로파일을 넣지 않습니다. Windows EXE는 `v0.2.1`에서 제공하며 macOS `.app`은 제공하지 않습니다.
+임의 프로비저닝 프로파일을 넣지 않습니다. Windows EXE는 `v0.2.1`에서 제공하며 macOS `.app`/DMG는 `v0.3.0`부터 제공합니다.
 
 ## Android / Galaxy 설치
 
