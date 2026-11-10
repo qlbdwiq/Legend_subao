@@ -13,11 +13,12 @@ GitHub [Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 실제
 | `drone-camera-android-v0.2.0-debug.apk` | Android/Galaxy에 설치 가능한 개발용 서명 APK |
 | `drone-camera-ios-v0.2.0-xcode-project.zip` | Mac의 Xcode에서 무료 Apple 계정으로 직접 서명·설치할 프로젝트 |
 | `drone-camera-ios-v0.2.0-unsigned.ipa` | 실제 iPhone arm64 빌드의 **서명 전** 패키지. 그대로 설치할 수 없음 |
-| `phase-01-camera-stream-v0.2.0.zip` | Windows/macOS 데스크톱 Python 수신 프로그램 소스 |
+| `DroneCollisionDetection-v0.2.1-windows-x64.exe` | v0.2.1 릴리즈의 Python 설치 없는 Windows 데스크톱 |
+| `phase-01-camera-stream-v0.2.1.zip` | v0.2.1 릴리즈의 Windows/macOS 데스크톱 Python 소스 |
 
 APK는 Play Store용 배포 키가 아닌 CI 개발 키로 서명됩니다. 다른 CI 빌드로 업데이트할 때
 서명이 다르면 기존 앱을 삭제한 뒤 재설치해야 합니다. IPA에 Apple 서명을 위조하거나
-임의 프로비저닝 프로파일을 넣지 않습니다. `.exe`·`.app`은 제공하지 않습니다.
+임의 프로비저닝 프로파일을 넣지 않습니다. Windows EXE는 `v0.2.1`에서 제공하며 macOS `.app`은 제공하지 않습니다.
 
 ## Android / Galaxy 설치
 
@@ -66,6 +67,7 @@ USB 테더링이나 모바일 데이터 요금제가 필요하지 않습니다.
 
 1. PC에 Google 공식 [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)를 설치하고
    `adb` 실행 파일이 있는 폴더를 `PATH`에 추가합니다. 명령창의 `adb version`으로 확인합니다.
+   **Windows v0.2.1 EXE 사용자는 adb가 내장되어 이 설치 단계를 생략합니다.**
 2. Galaxy의 **설정 → 휴대전화 정보 → 소프트웨어 정보 → 빌드번호**를 여러 번 눌러 개발자 옵션을 열고
    **USB 디버깅**을 켭니다. 처음 연결 시 휴대폰에서 본인 PC의 디버깅 키를 승인합니다.
 3. 데이터 USB 케이블로 연결하고 `adb devices`에서 `device` 상태를 확인합니다.

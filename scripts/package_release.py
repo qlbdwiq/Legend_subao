@@ -11,12 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 STAGE = ROOT / "stages" / "01-camera-stream"
 
 
-def package(output: Path | None = None, version: str = "0.2.0") -> Path:
+def package(output: Path | None = None, version: str = "0.2.1") -> Path:
     output = output or ROOT / "dist" / f"phase-01-camera-stream-v{version}.zip"
     output.parent.mkdir(parents=True, exist_ok=True)
     paths = [ROOT / "LICENSE", ROOT / "README.md", ROOT / "docs" / "roadmap.md",
              ROOT / "docs" / "releases" / f"v{version}.md",
              ROOT / "docs" / "mobile" / "README.md",
+             ROOT / "docs" / "windows-exe.md",
              ROOT / "scripts" / "make_test_video.py", ROOT / "scripts" / "package_release.py",
              STAGE / "requirements.txt", STAGE / "config.example.json",
              STAGE / "README.md", STAGE / "pytest.ini"]
@@ -36,5 +37,5 @@ def package(output: Path | None = None, version: str = "0.2.0") -> Path:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--version", default="0.2.0", choices=["0.2.0"])
+    parser.add_argument("--version", default="0.2.1", choices=["0.2.1"])
     package(version=parser.parse_args().version)
