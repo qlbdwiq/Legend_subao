@@ -27,6 +27,32 @@ public class StreamTest {
         assertEquals(2, frames.after(0).sequence());
         frames.close(); assertNull(frames.after(2));
     }
+    @Test public void streamModesKeepPerResolutionFpsCeilings() {
+        assertEquals(java.util.List.of(15, 24, 30, 60), StreamModes.fpsOptions(60));
+        assertEquals(java.util.List.of(15, 24, 30, 60, 120, 240), StreamModes.fpsOptions(240));
+        assertEquals(120, StreamModes.maxFpsFromMinDuration(8_333_333L, 240));
+        assertEquals(60, StreamModes.maxFpsFromMinDuration(8_333_333L, 60));
+        java.util.List<StreamModes.Mode> modes = StreamModes.normalize(java.util.List.of(
+                new StreamModes.Mode(3840, 2160, 60), new StreamModes.Mode(1920, 1080, 240),
+                new StreamModes.Mode(7680, 4320, 30)));
+        assertEquals(2, modes.size());
+        assertEquals(240, StreamModes.bestFps(modes).maxFps());
+        assertEquals(3840, StreamModes.bestResolution(modes).width());
+        assertTrue(StreamModes.capabilitiesJson("back", modes, modes.get(0)).contains("\"max_fps\":60"));
+    }
+    @Test public void capabilitiesEndpointRequiresToken() throws Exception {
+        FrameHub frames = new FrameHub();
+        String json = "{\"version\":1,\"modes\":[]}";
+        try (MjpegServer server = new MjpegServer(frames, 0, MjpegServer.newToken(), json)) {
+            String base = "http://127.0.0.1:" + server.port();
+            HttpURLConnection denied = (HttpURLConnection)new URL(base + "/capabilities?token=wrong").openConnection();
+            denied.setReadTimeout(3000); assertEquals(403, denied.getResponseCode()); denied.disconnect();
+            HttpURLConnection allowed = (HttpURLConnection)new URL(base + "/capabilities?token="
+                    + server.url("127.0.0.1").split("token=")[1]).openConnection();
+            allowed.setReadTimeout(3000); assertEquals(200, allowed.getResponseCode());
+            assertTrue(allowed.getContentType().contains("application/json")); allowed.disconnect();
+        } finally { frames.close(); }
+    }
     @Test public void arbitraryYuvStridesProduceNv21() {
         byte[] result = Yuv420.nv21(4,2,
                 new ByteBuffer[]{ByteBuffer.wrap(new byte[]{1,2,3,4,0,0,5,6,7,8}),

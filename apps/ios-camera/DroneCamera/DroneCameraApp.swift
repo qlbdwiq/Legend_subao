@@ -18,11 +18,29 @@ import SwiftUI
                     }.buttonStyle(.borderedProminent)
                     Button("연결 주소 복사 / Copy URL") { UIPasteboard.general.string = camera.url }
                         .buttonStyle(.bordered).disabled(camera.url.isEmpty)
-                    Picker("송출 FPS", selection: $camera.targetFps) {
-                        Text("15 FPS").tag(15)
-                        Text("30 FPS").tag(30)
-                    }.pickerStyle(.segmented).frame(width: 160).disabled(camera.running)
                     Text("USB: 데스크톱의 USB 연결 도우미 사용").font(.caption)
+                }
+                HStack {
+                    Picker("카메라", selection: $camera.useFrontCamera) {
+                        Text("후면").tag(false)
+                        Text("전면").tag(true)
+                    }.pickerStyle(.segmented).frame(width: 140).disabled(camera.running)
+                        .onChange(of: camera.useFrontCamera) { _ in camera.refreshModes() }
+                    Picker("해상도", selection: $camera.selectedModeIndex) {
+                        ForEach(camera.modes.indices, id: \.self) { index in
+                            Text(camera.modes[index].label).tag(index)
+                        }
+                    }.disabled(camera.running)
+                        .onChange(of: camera.selectedModeIndex) { _ in
+                            if !camera.fpsChoices.contains(camera.targetFps) {
+                                camera.targetFps = camera.fpsChoices.contains(30) ? 30 : (camera.fpsChoices.last ?? 30)
+                            }
+                        }
+                    Picker("송출 FPS", selection: $camera.targetFps) {
+                        ForEach(camera.fpsChoices, id: \.self) { fps in
+                            Text("\(fps) FPS").tag(fps)
+                        }
+                    }.disabled(camera.running)
                 }
             }.padding().foregroundStyle(.white).background(Color(red: 0.067, green: 0.094, blue: 0.153))
                 .preferredColorScheme(.dark)

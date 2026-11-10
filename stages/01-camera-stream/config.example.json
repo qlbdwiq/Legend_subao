@@ -10,7 +10,11 @@
       "auto_reconnect": true,
       "reconnect_delay_seconds": 2.0,
       "max_reconnect_attempts": 5,
-      "loop_file": false
+      "loop_file": false,
+      "requested_width": 0,
+      "requested_height": 0,
+      "requested_fps": 0,
+      "facing": ""
     },
     {
       "id": "camera-02",
@@ -21,7 +25,11 @@
       "auto_reconnect": true,
       "reconnect_delay_seconds": 2.0,
       "max_reconnect_attempts": 5,
-      "loop_file": false
+      "loop_file": false,
+      "requested_width": 0,
+      "requested_height": 0,
+      "requested_fps": 0,
+      "facing": ""
     }
   ]
 }
