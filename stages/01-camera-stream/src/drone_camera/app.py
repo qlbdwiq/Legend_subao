@@ -37,5 +37,5 @@ def main(argv=None):
     window = MainWindow(configs, path)
     window.show()
     # Also close workers on non-window event-loop shutdown.
-    app.aboutToQuit.connect(lambda: [source.close() for source in window.sources])
+    app.aboutToQuit.connect(window.shutdown)
     return app.exec()
