@@ -15,6 +15,7 @@ public final class MjpegServer implements AutoCloseable {
     private final ExecutorService workers = Executors.newFixedThreadPool(2);
     private final Semaphore slots = new Semaphore(2);
     private final String token;
+    private final String capabilitiesJson;
     private volatile boolean running = true;
     private final Thread acceptor;
 
@@ -28,7 +29,11 @@ public final class MjpegServer implements AutoCloseable {
         return value.toString();
     }
     public MjpegServer(FrameHub frames, int port, String sessionToken) throws IOException {
+        this(frames, port, sessionToken, null);
+    }
+    public MjpegServer(FrameHub frames, int port, String sessionToken, String capabilities) throws IOException {
         this.frames = frames;
+        this.capabilitiesJson = capabilities;
         token = sessionToken;
         listener = new ServerSocket(); listener.setReuseAddress(true);
         listener.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 4);
@@ -69,6 +74,18 @@ public final class MjpegServer implements AutoCloseable {
                 reply(output, "400 Bad Request"); return;
             }
             String target = request[1];
+            if (target.startsWith("/capabilities")) {
+                String expectedCaps = "/capabilities?token=" + token;
+                if (capabilitiesJson == null || !MessageDigest.isEqual(
+                        target.getBytes(StandardCharsets.US_ASCII), expectedCaps.getBytes(StandardCharsets.US_ASCII))) {
+                    reply(output, "403 Forbidden"); return;
+                }
+                byte[] body = capabilitiesJson.getBytes(StandardCharsets.UTF_8);
+                output.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                        + body.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+                output.write(body); output.flush();
+                return;
+            }
             String expected = "/stream.mjpg?token=" + token;
             if (!MessageDigest.isEqual(target.getBytes(StandardCharsets.US_ASCII), expected.getBytes(StandardCharsets.US_ASCII))) {
                 reply(output, "403 Forbidden"); return;

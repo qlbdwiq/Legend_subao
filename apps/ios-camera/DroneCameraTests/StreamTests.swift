@@ -39,6 +39,30 @@ final class StreamTests: XCTestCase {
             } else { self.receive(connection, buffer: buffer, done: done) }
         }
     }
+    func testStreamModeCombinationsArePerResolution() {
+        let modes = StreamCapabilities.normalize([
+            StreamModeOption(width: 3840, height: 2160, maxFps: 60),
+            StreamModeOption(width: 1920, height: 1080, maxFps: 240),
+            StreamModeOption(width: 7680, height: 4320, maxFps: 30),
+            StreamModeOption(width: 3840, height: 2160, maxFps: 30),
+        ])
+        XCTAssertEqual(modes.count, 2)
+        XCTAssertEqual(StreamCapabilities.fpsOptions(for: modes[0]), [15, 24, 30, 60])
+        XCTAssertEqual(StreamCapabilities.bestFps(modes)?.maxFps, 240)
+        XCTAssertEqual(StreamCapabilities.bestResolution(modes)?.width, 3840)
+        let json = String(data: StreamCapabilities.capabilitiesData(
+            facing: "back", modes: modes, selected: modes[0]), encoding: .utf8)!
+        XCTAssertTrue(json.contains("\"max_fps\":60"))
+    }
+    func testCapabilitiesAuthorization() {
+        let token = "0123456789abcdef0123456789abcdef"
+        XCTAssertTrue(StreamProtocol.authorizedCapabilities(
+            "GET /capabilities?token=\(token) HTTP/1.1\r\nHost: local\r\n\r\n", token: token))
+        XCTAssertFalse(StreamProtocol.authorizedCapabilities(
+            "GET /capabilities?token=wrong HTTP/1.1\r\n\r\n", token: token))
+        XCTAssertTrue(StreamProtocol.isCapabilitiesRequest(
+            "GET /capabilities?token=\(token) HTTP/1.1\r\n\r\n"))
+    }
     func testPairingAndRejection() {
         let token = "0123456789abcdef0123456789abcdef"
         XCTAssertTrue(StreamProtocol.authorized("GET /stream.mjpg?token=\(token) HTTP/1.1\r\nHost: local\r\n\r\n", token: token))

@@ -142,6 +142,30 @@ def test_usb_uses_integer_device_backend(monkeypatch):
     assert calls == [(2,)]
 
 
+def test_usb_requested_format_is_applied_and_actual_is_reported(monkeypatch):
+    applied = []
+    class FakeCapture:
+        def isOpened(self):
+            return True
+        def set(self, prop, value):
+            applied.append((prop, value))
+            return True
+        def get(self, _prop):
+            return 120
+        def read(self):
+            return True, np.full((1080, 1920, 3), 90, np.uint8)
+        def release(self):
+            pass
+    monkeypatch.setattr(cv2, "VideoCapture", lambda *args: FakeCapture())
+    config = replace(defaults()[0], source=0, requested_width=1920,
+                     requested_height=1080, requested_fps=120)
+    opened = capture._open_capture(config)
+    assert (cv2.CAP_PROP_FRAME_WIDTH, 1920) in applied
+    assert (cv2.CAP_PROP_FRAME_HEIGHT, 1080) in applied
+    assert (cv2.CAP_PROP_FPS, 120) in applied
+    assert opened.get(cv2.CAP_PROP_FPS) == 120
+
+
 def test_equal_clock_ticks_do_not_break_stream(monkeypatch):
     ctx = mp.get_context("spawn")
     slot = capture._Slot(ctx)

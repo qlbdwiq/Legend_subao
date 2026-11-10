@@ -6,6 +6,7 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.graphics.*;
 import android.hardware.camera2.*;
+import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.*;
 import android.net.*;
 import android.os.*;
@@ -20,7 +21,8 @@ import java.util.*;
 public final class MainActivity extends Activity {
     private TextView status, address;
     private ImageView preview;
-    private Button start, copy, rate;
+    private Button start, copy, facingButton;
+    private Spinner resolutionSpinner, fpsSpinner;
     private HandlerThread cameraThread;
     private Handler cameraHandler;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -36,6 +38,14 @@ public final class MainActivity extends Activity {
     private final String sessionToken = MjpegServer.newToken();
     private int sessionPort;
     private volatile int targetFps = 30;
+    private int activeFacing = CameraCharacteristics.LENS_FACING_BACK;
+    private String activeCameraId;
+    private List<StreamModes.Mode> streamModes = List.of();
+    private List<Integer> fpsChoices = List.of(30);
+    private int activeWidth, activeHeight;
+    private int encodedInWindow;
+    private long fpsWindowStartNanos;
+    private volatile double measuredEncodeFps;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -57,14 +67,106 @@ public final class MainActivity extends Activity {
         status = new TextView(this); status.setTextColor(Color.WHITE); status.setText("같은 Wi-Fi 또는 USB로 연결 · 후면 카메라"); column.addView(status);
         address = new TextView(this); address.setTextColor(Color.rgb(120, 210, 255)); address.setTextIsSelectable(true);
         address.setTextSize(13); column.addView(address);
+        LinearLayout formatRow = new LinearLayout(this);
+        resolutionSpinner = new Spinner(this);
+        fpsSpinner = new Spinner(this);
+        formatRow.addView(resolutionSpinner, new LinearLayout.LayoutParams(0, -2, 2));
+        formatRow.addView(fpsSpinner, new LinearLayout.LayoutParams(0, -2, 1));
+        column.addView(formatRow);
+        resolutionSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { updateFpsChoices(); }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
         LinearLayout actions = new LinearLayout(this);
         start = new Button(this); start.setText("송출 시작 / Start"); start.setOnClickListener(v -> { if (streaming) stop("송출 중지"); else requestCamera(); });
         copy = new Button(this); copy.setText("연결 주소 복사 / Copy URL"); copy.setEnabled(false);
         copy.setOnClickListener(v -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("Drone Camera URL", address.getText())));
-        rate = new Button(this); rate.setText("30 FPS");
-        rate.setOnClickListener(v -> { targetFps = targetFps == 30 ? 15 : 30; rate.setText(targetFps+" FPS"); });
-        actions.addView(start); actions.addView(copy); actions.addView(rate); column.addView(actions);
+        facingButton = new Button(this); facingButton.setText("후면 / Back");
+        facingButton.setOnClickListener(v -> {
+            activeFacing = activeFacing == CameraCharacteristics.LENS_FACING_BACK
+                    ? CameraCharacteristics.LENS_FACING_FRONT : CameraCharacteristics.LENS_FACING_BACK;
+            facingButton.setText(activeFacing == CameraCharacteristics.LENS_FACING_BACK ? "후면 / Back" : "전면 / Front");
+            refreshModes();
+        });
+        actions.addView(start); actions.addView(copy); actions.addView(facingButton); column.addView(actions);
         setContentView(column);
+        refreshModes();
+    }
+
+    /** Enumerate live-streaming modes for the selected lens from Camera2. */
+    private void refreshModes() {
+        try {
+            CameraManager manager = (CameraManager)getSystemService(CAMERA_SERVICE);
+            activeCameraId = null;
+            for (String candidate : manager.getCameraIdList()) {
+                Integer lens = manager.getCameraCharacteristics(candidate).get(CameraCharacteristics.LENS_FACING);
+                if (lens != null && lens == activeFacing) { activeCameraId = candidate; break; }
+            }
+            if (activeCameraId == null) {
+                streamModes = List.of();
+                status.setText("선택한 방향의 카메라를 찾을 수 없습니다.");
+                return;
+            }
+            CameraCharacteristics characteristics = manager.getCameraCharacteristics(activeCameraId);
+            Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+            int aeMax = 0;
+            if (ranges != null) for (Range<Integer> range : ranges) aeMax = Math.max(aeMax, range.getUpper());
+            StreamConfigurationMap map = Objects.requireNonNull(
+                    characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP));
+            Size[] sizes = map.getOutputSizes(ImageFormat.YUV_420_888);
+            List<StreamModes.Mode> modes = new ArrayList<>();
+            if (sizes != null) for (Size size : sizes) {
+                long duration = 0;
+                try { duration = map.getOutputMinFrameDuration(ImageFormat.YUV_420_888, size); }
+                catch (RuntimeException ignored) { }
+                modes.add(new StreamModes.Mode(size.getWidth(), size.getHeight(),
+                        StreamModes.maxFpsFromMinDuration(duration, aeMax)));
+            }
+            streamModes = StreamModes.normalize(modes);
+            List<String> labels = new ArrayList<>();
+            for (StreamModes.Mode mode : streamModes) labels.add(mode.label() + " · 최대 " + mode.maxFps() + " FPS");
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            resolutionSpinner.setAdapter(adapter);
+            int selected = StreamModes.defaultIndex(streamModes);
+            if (selected >= 0) resolutionSpinner.setSelection(selected);
+            updateFpsChoices();
+            StreamModes.Mode best = StreamModes.bestResolution(streamModes);
+            StreamModes.Mode fastest = StreamModes.bestFps(streamModes);
+            if (best != null && !streaming) status.setText(
+                    "같은 Wi-Fi 또는 USB로 연결 · " + (activeFacing == CameraCharacteristics.LENS_FACING_BACK ? "후면" : "전면")
+                    + " · 최고 " + best.label() + " @ " + best.maxFps() + " FPS · 최고 속도 "
+                    + fastest.label() + " @ " + fastest.maxFps() + " FPS");
+        } catch (Exception e) {
+            streamModes = List.of();
+            status.setText("카메라 지원 범위를 확인할 수 없습니다. 권한을 확인하세요.");
+        }
+    }
+
+    private void updateFpsChoices() {
+        int position = resolutionSpinner == null ? -1 : resolutionSpinner.getSelectedItemPosition();
+        if (position < 0 || position >= streamModes.size()) { fpsChoices = List.of(30); return; }
+        fpsChoices = StreamModes.fpsOptions(streamModes.get(position).maxFps());
+        List<String> labels = new ArrayList<>();
+        for (int fps : fpsChoices) labels.add(fps + " FPS");
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        fpsSpinner.setAdapter(adapter);
+        int preferred = fpsChoices.indexOf(30);
+        fpsSpinner.setSelection(preferred >= 0 ? preferred : fpsChoices.size() - 1);
+    }
+
+    private StreamModes.Mode selectedMode() {
+        int position = resolutionSpinner.getSelectedItemPosition();
+        if (position >= 0 && position < streamModes.size()) return streamModes.get(position);
+        int fallback = StreamModes.defaultIndex(streamModes);
+        return fallback >= 0 ? streamModes.get(fallback) : new StreamModes.Mode(1280, 720, 30);
+    }
+
+    private int selectedFps(StreamModes.Mode mode) {
+        int position = fpsSpinner.getSelectedItemPosition();
+        if (position >= 0 && position < fpsChoices.size()) return fpsChoices.get(position);
+        return Math.min(30, mode.maxFps());
     }
     private void requestCamera() {
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)
@@ -79,32 +181,36 @@ public final class MainActivity extends Activity {
     private void begin() {
         if (streaming) return;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
+        if (streamModes.isEmpty()) refreshModes();
+        final StreamModes.Mode mode = selectedMode();
+        targetFps = selectedFps(mode);
+        activeWidth = mode.width(); activeHeight = mode.height();
         final long current = ++generation;
         try {
-            frames = new FrameHub(); server = new MjpegServer(frames, sessionPort, sessionToken); sessionPort = server.port();
+            String facingName = activeFacing == CameraCharacteristics.LENS_FACING_BACK ? "back" : "front";
+            frames = new FrameHub();
+            server = new MjpegServer(frames, sessionPort, sessionToken,
+                    StreamModes.capabilitiesJson(facingName, streamModes, mode));
+            sessionPort = server.port();
             streaming = true; nextEncodeAt = 0; previewSequence = 0;
+            encodedInWindow = 0; fpsWindowStartNanos = 0; measuredEncodeFps = 0;
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             start.setText("송출 중지 / Stop"); copy.setEnabled(true);
-            rate.setEnabled(false);
+            resolutionSpinner.setEnabled(false); fpsSpinner.setEnabled(false); facingButton.setEnabled(false);
             address.setText(server.url(wifiAddress()));
             status.setText("연결 중 · URL을 데스크톱에 입력 · USB는 연결 도우미 사용");
             cameraThread = new HandlerThread("camera-encoder"); cameraThread.start();
             cameraHandler = new Handler(cameraThread.getLooper());
             CameraManager manager = (CameraManager)getSystemService(CAMERA_SERVICE);
-            String id = null;
-            for (String candidate : manager.getCameraIdList()) {
-                Integer lens = manager.getCameraCharacteristics(candidate).get(CameraCharacteristics.LENS_FACING);
-                if (lens != null && lens == CameraCharacteristics.LENS_FACING_BACK) { id = candidate; break; }
-            }
-            if (id == null) throw new IllegalStateException("No rear camera");
+            String id = activeCameraId;
+            if (id == null) throw new IllegalStateException("No selected camera");
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
             Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+            final int requestedFps = targetFps;
             Range<Integer> frameRate = ranges == null ? null : Arrays.stream(ranges)
-                    .filter(r -> r.getLower() <= targetFps && r.getUpper() >= targetFps)
-                    .min(Comparator.comparingInt(r -> Math.abs(r.getUpper()-targetFps)+Math.abs(r.getLower()-targetFps))).orElse(null);
-            Size[] sizes = Objects.requireNonNull(characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)).getOutputSizes(ImageFormat.YUV_420_888);
-            Size size = Arrays.stream(sizes).filter(s -> s.getWidth() <= 1280 && s.getHeight() <= 720 && s.getWidth()%2==0 && s.getHeight()%2==0)
-                    .max(Comparator.comparingInt(s -> s.getWidth()*s.getHeight())).orElseThrow(() -> new IllegalStateException("No supported size"));
+                    .filter(r -> r.getLower() <= requestedFps && r.getUpper() >= requestedFps)
+                    .min(Comparator.comparingInt(r -> Math.abs(r.getUpper()-requestedFps)+Math.abs(r.getLower()-requestedFps))).orElse(null);
+            Size size = new Size(mode.width(), mode.height());
             Integer sensor = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
             int display = getWindowManager().getDefaultDisplay().getRotation() * 90;
             rotation = ((sensor == null ? 0 : sensor) - display + 360) % 360;
@@ -125,7 +231,8 @@ public final class MainActivity extends Activity {
                                     request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
                                     if (frameRate != null) request.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, frameRate);
                                     configured.setRepeatingRequest(request.build(), null, cameraHandler);
-                                    ui.post(() -> status.setText(size.getWidth()+" × "+size.getHeight()+" · MJPEG 최대 "+targetFps+" FPS · 앱을 열린 상태로 유지"));
+                                    ui.post(() -> status.setText(size.getWidth()+" × "+size.getHeight()
+                                            +" · 설정 "+requestedFps+" FPS · 앱을 열린 상태로 유지"));
                                 } catch (CameraAccessException | IllegalStateException e) { if (generation == current) failed(); }
                             }
                             @Override public void onConfigureFailed(CameraCaptureSession ignored) { if (generation == current) failed(); }
@@ -136,7 +243,7 @@ public final class MainActivity extends Activity {
                 @Override public void onError(CameraDevice device, int error) { device.close(); if (generation == current) failed(); }
             }, ui);
             ui.post(previewTick);
-        } catch (Exception e) { stop("시작 실패: 카메라 권한, 후면 카메라, 네트워크를 확인하세요."); }
+        } catch (Exception e) { stop("시작 실패: 카메라 권한, 선택한 해상도/FPS 지원 여부, 네트워크를 확인하세요."); }
     }
     private void encode(ImageReader source) {
         if (!streaming || source != reader) return;
@@ -164,7 +271,21 @@ public final class MainActivity extends Activity {
                 if (bitmap != rotated) bitmap.recycle(); rotated.recycle();
             }
             FrameHub hub = frames;
-            if (streaming && source == reader && hub != null) hub.publish(jpeg);
+            if (streaming && source == reader && hub != null) {
+                hub.publish(jpeg);
+                encodedInWindow++;
+                if (fpsWindowStartNanos == 0) fpsWindowStartNanos = now;
+                double elapsed = (now - fpsWindowStartNanos) / 1_000_000_000.0;
+                if (elapsed >= 1.0) {
+                    measuredEncodeFps = encodedInWindow / elapsed;
+                    encodedInWindow = 0; fpsWindowStartNanos = now;
+                    final double measured = measuredEncodeFps;
+                    final int requested = targetFps;
+                    ui.post(() -> { if (streaming) status.setText(activeWidth+" × "+activeHeight
+                            +" · 설정 "+requested+" FPS · 실제 인코딩 "+String.format(Locale.ROOT, "%.1f", measured)
+                            +" FPS · 앱을 열린 상태로 유지"); });
+                }
+            }
         } catch (IllegalStateException e) { if (streaming) failed(); }
     }
     private final Runnable previewTick = new Runnable() {
@@ -204,7 +325,9 @@ public final class MainActivity extends Activity {
         if (frames != null) { frames.close(); frames = null; }
         cameraThread = null; cameraHandler = null;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        start.setText("송출 시작 / Start"); copy.setEnabled(false); rate.setEnabled(true); address.setText("");
+        start.setText("송출 시작 / Start"); copy.setEnabled(false);
+        resolutionSpinner.setEnabled(true); fpsSpinner.setEnabled(true); facingButton.setEnabled(true);
+        address.setText("");
         preview.setImageDrawable(null); status.setText(message);
     }
     @Override protected void onPause() { stop("앱이 백그라운드로 이동하여 송출을 중지했습니다."); super.onPause(); }
