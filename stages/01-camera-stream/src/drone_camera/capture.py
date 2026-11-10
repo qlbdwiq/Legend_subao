@@ -69,9 +69,9 @@ class _Slot:
         self.pixels = ctx.RawArray("B", MAX_FRAME_BYTES)
         # sequence, width, height, wall time, monotonic time, fps
         self.meta = ctx.RawArray("d", 6)
-        self.state = ctx.Value("i", State.CONNECTING)
-        self.error = ctx.Value("i", 0)
-        self.heartbeat = ctx.Value("d", time.monotonic())
+        self.state = ctx.RawValue("i", State.CONNECTING)
+        self.error = ctx.RawValue("i", 0)
+        self.heartbeat = ctx.RawValue("d", time.monotonic())
 
 
 def _open_capture(config):
@@ -123,7 +123,8 @@ def _capture_worker(config: CameraConfig, slot: _Slot, stop):
                         break
                     now = time.monotonic()
                     height, width = image.shape[:2]
-                    if image.nbytes > MAX_FRAME_BYTES or image.ndim != 3 or image.shape[2] != 3:
+                    if (width > 3840 or height > 2160 or image.nbytes > MAX_FRAME_BYTES
+                            or image.ndim != 3 or image.shape[2] != 3):
                         slot.error.value = 3
                         slot.state.value = State.ERROR
                         return
@@ -214,7 +215,7 @@ class CameraSource:
         if not self.active:
             return
         if not self._process.is_alive():
-            if self._stopping_at is not None:
+            if self._stopping_at is not None and self._override == (State.STOPPING, 0):
                 self._override = (State.DISCONNECTED, 0)
             elif self._override is None and self._slot.state.value not in (State.ERROR, State.ENDED):
                 self._override = (State.ERROR, 4)
@@ -226,8 +227,9 @@ class CameraSource:
                 self._process.terminate()
             if now - self._stopping_at > 2:
                 self._process.kill()
-        elif (self._slot.state.value in (State.CONNECTING, State.CONNECTED)
-              and now - self._slot.heartbeat.value > self.config.timeout_seconds + 3):
+        elif (self._slot.state.value in (State.CONNECTING, State.CONNECTED, State.RECONNECTING)
+              and now - self._slot.heartbeat.value > self.config.timeout_seconds + 3 + (
+                  self.config.reconnect_delay_seconds if self._slot.state.value == State.RECONNECTING else 0)):
             # Native USB/file backends may ignore timeouts. Recover safely by
             # ending this process; the user can explicitly reconnect.
             self.disconnect()

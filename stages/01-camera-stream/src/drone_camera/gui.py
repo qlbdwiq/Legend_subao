@@ -1,6 +1,5 @@
 """Qt presentation; acquisition and configuration remain usable without Qt."""
 
-from dataclasses import asdict
 from pathlib import Path
 import time
 
