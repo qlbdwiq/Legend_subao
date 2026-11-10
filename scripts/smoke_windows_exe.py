@@ -25,7 +25,7 @@ def main(executable: Path, evidence: Path):
         for name in list(env):
             if name.upper().startswith(("PYTHON", "VIRTUAL_ENV", "QT_", "PYSIDE", "CONDA")):
                 env.pop(name)
-        env["PATH"] = str(Path(env["SystemRoot"]) / "System32")
+        env["PATH"] = str(Path(env["SYSTEMROOT"]) / "System32")
         env["QT_QPA_PLATFORM"] = "windows"  # Check qwindows, not only the offscreen plugin.
         env["LOCALAPPDATA"] = str(folder / "AppData")
         video = folder / "테스트 영상.avi"
