@@ -12,6 +12,10 @@ USB 웹캠, 로컬 동영상을 혼합해 사용할 수 있습니다. LiDAR·YOL
 
 ## Windows 설치 및 실행
 
+일반 사용자는 [Windows EXE 배포본](https://github.com/qlbdwiq/Legend_subao/releases/tag/v0.2.1)을
+내려받아 더블클릭하세요. Python 설치가 필요 없고 Android USB용 adb도 포함합니다.
+[EXE 설명서](../../docs/windows-exe.md)를 참고하세요. 아래는 소스 개발용 설치 방법입니다.
+
 Python.org의 **Python 3.11 또는 3.12 x86-64**를 설치합니다. PowerShell에서 저장소 루트로 이동하여:
 
 ```powershell

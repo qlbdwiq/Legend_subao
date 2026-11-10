@@ -44,6 +44,13 @@ Android는 개발용 서명 APK, iPhone은 무료 Apple 계정으로 직접 설�
 
 ## 빠른 시작
 
+**Windows 일반 사용자는 Python 설치 없이 EXE를 실행할 수 있습니다.**
+[v0.2.1의 단일 EXE](https://github.com/qlbdwiq/Legend_subao/releases/download/v0.2.1/DroneCollisionDetection-v0.2.1-windows-x64.exe)를
+내려받아 더블클릭하고 설정에서 카메라를 연결하세요. [EXE 사용 설명](docs/windows-exe.md).
+Python·OpenCV·Qt와 Android USB용 adb를 포함합니다. 기기 USB 드라이버·권한 승인은 필요합니다.
+
+아래 Python 설치는 **소스 개발 또는 macOS 실행**용입니다.
+
 Python **3.11 또는 3.12**를 권장합니다. Windows 10/11 x86-64, macOS Apple Silicon 및
 Intel을 대상으로 같은 소스를 사용합니다. CPU만 필요하며 CUDA는 사용하지 않습니다.
 Python 3.13 이상은 이 릴리즈의 고정 의존성·CI 지원 범위가 아닙니다.
@@ -84,9 +91,10 @@ CI는 PR과 `main` push에 Windows/macOS Python 3.11·3.12 및 macOS Intel 3.11 
 컴파일 및 서명 전 IPA·Xcode 프로젝트 생성을 추가로 수행합니다.
 
 [GitHub Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 게시된 버전을 확인할 수 있습니다.
-`v0.2.0`용 데스크톱 소스 ZIP·APK·서명 전 IPA·Xcode 프로젝트를 기본 브랜치 전용 워크플로에서 생성합니다.
+`v0.2.1`은 테스트한 Windows EXE·압축본·소스를 기본 브랜치 전용 워크플로에서 게시합니다.
+모바일 APK·서명 전 IPA·Xcode 프로젝트는 `v0.2.0` 배포본을 그대로 사용합니다.
 기존 `v0.1.0` 태그와 게시 파일은 보존합니다.
-태그·릴리즈의 실제 게시 상태는 Releases 페이지를 기준으로 하세요. `.exe` / `.app`은 제공하지 않습니다.
+태그·릴리즈의 실제 게시 상태는 Releases 페이지를 기준으로 하세요. macOS `.app`은 제공하지 않습니다.
 
 로컬 합성 영상·MJPEG 테스트나 CI 통과는 실제 iPhone/Android 스트림, USB 드라이버 또는
 모든 Windows/macOS 장비에서의 성능을 보장하지 않습니다. 수신기의 720p30 두 채널은 실장비 검증 목표이며,
