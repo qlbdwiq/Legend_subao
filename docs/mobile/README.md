@@ -10,9 +10,9 @@ GitHub [Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 실제
 
 | 파일 | 용도 |
 | --- | --- |
-| `drone-camera-android-v0.2.0-debug.apk` | Android/Galaxy에 설치 가능한 개발용 서명 APK |
-| `drone-camera-ios-v0.2.0-xcode-project.zip` | Mac의 Xcode에서 무료 Apple 계정으로 직접 서명·설치할 프로젝트 |
-| `drone-camera-ios-v0.2.0-unsigned.ipa` | 실제 iPhone arm64 빌드의 **서명 전** 패키지. 그대로 설치할 수 없음 |
+| `drone-camera-android-v0.4.0-debug.apk` | Android/Galaxy에 설치 가능한 개발용 서명 APK |
+| `drone-camera-ios-v0.4.0-xcode-project.zip` | Mac의 Xcode에서 무료 Apple 계정으로 직접 서명·설치할 프로젝트 |
+| `drone-camera-ios-v0.4.0-unsigned.ipa` | 실제 iPhone arm64 빌드의 **서명 전** 패키지. 그대로 설치할 수 없음 |
 | `DroneCollisionDetection-v0.2.1-windows-x64.exe` | v0.2.1 릴리즈의 Python 설치 없는 Windows 데스크톱 |
 | `phase-01-camera-stream-v0.2.1.zip` | v0.2.1 릴리즈의 Windows/macOS 데스크톱 Python 소스 |
 
@@ -33,7 +33,7 @@ APK는 Play Store용 배포 키가 아닌 CI 개발 키로 서명됩니다. 다�
 ## iPhone — 무료 Apple 계정 + Mac에서 직접 설치
 
 1. Mac에 Xcode와 iPhone 플랫폼 지원을 설치합니다. 앱의 iOS 대상 버전은 **iOS 16 이상**입니다.
-2. `drone-camera-ios-v0.2.0-xcode-project.zip`을 풀고 `DroneCamera.xcodeproj`를 엽니다.
+2. `drone-camera-ios-v0.4.0-xcode-project.zip`을 풀고 `DroneCamera.xcodeproj`를 엽니다.
 3. Xcode **Settings → Accounts**에서 본인 Apple 계정을 추가합니다. 계정/비밀번호는 채팅에 보내지 않습니다.
 4. 프로젝트의 **DroneCamera target → Signing & Capabilities**에서 **Automatically manage signing**을 켜고
    본인 **Personal Team**을 선택합니다. Bundle Identifier가 등록되지 않으면 `com.본인고유이름.dronecamera`로 바꿉니다.
