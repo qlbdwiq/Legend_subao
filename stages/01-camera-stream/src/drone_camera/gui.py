@@ -8,7 +8,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QMessageBox, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .capture import CameraSource, State
@@ -21,6 +21,7 @@ class VideoView(QLabel):
         self._image = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(240, 180)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.setStyleSheet("background: #05080d; color: #93a4bd; border-radius: 8px;")
 
     def set_frame(self, frame):

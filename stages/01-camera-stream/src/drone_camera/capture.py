@@ -9,6 +9,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum
 import multiprocessing as mp
+import os
 from pathlib import Path
 import time
 
@@ -88,6 +89,7 @@ def _open_capture(config):
 
 
 def _capture_worker(config: CameraConfig, slot: _Slot, stop):
+    os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "-8"  # AV_LOG_QUIET; URLs may contain passwords.
     import cv2
     cv2.setLogLevel(0)
     retries = 0

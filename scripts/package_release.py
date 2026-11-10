@@ -14,6 +14,8 @@ def package(output: Path | None = None) -> Path:
     output = output or ROOT / "dist" / "phase-01-camera-stream-v0.1.0.zip"
     output.parent.mkdir(parents=True, exist_ok=True)
     paths = [ROOT / "LICENSE", ROOT / "README.md", ROOT / "docs" / "roadmap.md",
+             ROOT / "docs" / "releases" / "v0.1.0.md",
+             ROOT / "scripts" / "make_test_video.py", ROOT / "scripts" / "package_release.py",
              STAGE / "requirements.txt", STAGE / "config.example.json",
              STAGE / "README.md", STAGE / "pytest.ini"]
     paths += sorted((STAGE / "src").rglob("*.py"))
