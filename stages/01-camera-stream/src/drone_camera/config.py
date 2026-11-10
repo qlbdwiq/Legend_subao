@@ -26,6 +26,14 @@ class CameraConfig:
     loop_file: bool = False
     usb_platform: str = ""
     usb_serial: str = ""
+    # Requested live-stream format. Zero means Auto (device default). For
+    # USB webcams the receiver applies these; for phone MJPEG/RTSP streams
+    # they record the intended format and the GUI compares them against
+    # the phone's enumerated capabilities and the actual received frames.
+    requested_width: int = 0
+    requested_height: int = 0
+    requested_fps: int = 0
+    facing: str = ""
 
     def __post_init__(self):
         if self.id not in ("camera-01", "camera-02"):
@@ -59,6 +67,20 @@ class CameraConfig:
             raise ConfigError("Reconnect attempts must be an integer from 0 to 100.")
         if type(self.auto_reconnect) is not bool or type(self.loop_file) is not bool:
             raise ConfigError("Reconnect and file loop settings must be booleans.")
+        if type(self.requested_width) is not int or type(self.requested_height) is not int \
+                or type(self.requested_fps) is not int:
+            raise ConfigError("Requested resolution and FPS must be integers (0 means Auto).")
+        if (self.requested_width == 0) != (self.requested_height == 0):
+            raise ConfigError("Requested width and height must be set together (0 means Auto).")
+        if self.requested_width and not (16 <= self.requested_width <= 3840
+                                         and 16 <= self.requested_height <= 2160
+                                         and self.requested_width % 2 == 0
+                                         and self.requested_height % 2 == 0):
+            raise ConfigError("Requested resolution must be even and at most 3840 × 2160, or 0 for Auto.")
+        if not 0 <= self.requested_fps <= 240:
+            raise ConfigError("Requested FPS must be from 0 (Auto) to 240.")
+        if self.facing not in ("", "back", "front"):
+            raise ConfigError("Camera facing must be Auto, back or front.")
         if self.usb_platform not in ("", "android", "ios") or not isinstance(self.usb_serial, str) or len(self.usb_serial) > 128:
             raise ConfigError("USB platform/serial settings are invalid.")
         if self.usb_platform:

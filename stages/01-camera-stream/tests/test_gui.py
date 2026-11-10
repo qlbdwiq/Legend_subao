@@ -52,3 +52,49 @@ def test_settings_dialog_roundtrip(qapp):
     dialog._validate()
     assert dialog.result_configs[0].input_type == "mjpeg"
     assert dialog.result_configs[0].name == "Android Camera"
+
+
+def test_settings_dialog_resolution_and_fps_are_independent(qapp):
+    dialog = SettingsDialog(defaults())
+    resolution = dialog.fields[0][8]
+    fps = dialog.fields[0][9]
+    for row in range(resolution.count()):
+        if tuple(resolution.itemData(row)) == (1920, 1080):
+            resolution.setCurrentIndex(row)
+    for row in range(fps.count()):
+        if fps.itemData(row) == 120:
+            fps.setCurrentIndex(row)
+    dialog.fields[0][1].setCurrentText("mjpeg")
+    dialog.fields[0][2].setText("http://127.0.0.1:8080/video")
+    dialog._validate()
+    assert dialog.result_configs[0].requested_width == 1920
+    assert dialog.result_configs[0].requested_height == 1080
+    assert dialog.result_configs[0].requested_fps == 120
+    # The second phone keeps its own independent (Auto) settings.
+    assert dialog.result_configs[1].requested_width == 0
+    assert dialog.result_configs[1].requested_fps == 0
+
+
+def test_settings_dialog_rejects_unsupported_probed_combination(qapp, monkeypatch):
+    from drone_camera.capabilities import StreamMode
+    dialog = SettingsDialog(defaults())
+    dialog.device_modes[0] = (StreamMode(3840, 2160, 60), StreamMode(1920, 1080, 240))
+    dialog._fill_resolution(0)
+    dialog._fill_fps(0)
+    resolution = dialog.fields[0][8]
+    for row in range(resolution.count()):
+        if tuple(resolution.itemData(row)) == (3840, 2160):
+            resolution.setCurrentIndex(row)
+    dialog._fill_fps(0)
+    offered = [dialog.fields[0][9].itemData(row) for row in range(dialog.fields[0][9].count())]
+    assert 120 not in offered  # 4K is capped at 60 FPS on this device.
+    warnings = []
+    monkeypatch.setattr("drone_camera.gui.QMessageBox.warning",
+                        lambda *args: warnings.append(args))
+    dialog.fields[0][9].addItem("120 FPS", 120)
+    dialog.fields[0][9].setCurrentIndex(dialog.fields[0][9].count() - 1)
+    dialog.fields[0][1].setCurrentText("mjpeg")
+    dialog.fields[0][2].setText("http://127.0.0.1:8080/video")
+    dialog._validate()
+    assert dialog.result_configs is None
+    assert warnings

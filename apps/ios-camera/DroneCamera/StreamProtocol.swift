@@ -29,6 +29,16 @@ enum StreamProtocol {
         guard a.count == b.count else { return false }
         return zip(a,b).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
     }
+    static func authorizedCapabilities(_ request: String, token: String) -> Bool {
+        let line = request.components(separatedBy: "\r\n")[0]
+        let expected = "GET /capabilities?token=\(token) HTTP/1.1"
+        let a = Array(line.utf8), b = Array(expected.utf8)
+        guard a.count == b.count else { return false }
+        return zip(a,b).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
+    }
+    static func isCapabilitiesRequest(_ request: String) -> Bool {
+        request.components(separatedBy: "\r\n")[0].hasPrefix("GET /capabilities")
+    }
     static func packet(_ frame: JpegFrame) -> Data {
         var result = Data("--droneframe\r\nContent-Type: image/jpeg\r\nContent-Length: \(frame.jpeg.count)\r\nX-Frame-Sequence: \(frame.sequence)\r\n\r\n".utf8)
         result.append(frame.jpeg); result.append(Data("\r\n".utf8))
