@@ -29,8 +29,8 @@ stages/01-camera-stream/
   requirements.txt
   README.md
 docs/roadmap.md
+docs/releases/           버전별 릴리즈 노트와 단계별 분류
 docs/mobile/README.md   모바일 설치 및 Wi-Fi·USB 연결
-docs/releases/          버전별 릴리즈 노트
 scripts/                합성 테스트 영상 및 소스 ZIP 생성
 ```
 
@@ -94,7 +94,8 @@ CI는 PR과 `main` push에 Windows/macOS Python 3.11·3.12 및 macOS Intel 3.11 
 모바일 CI는 Android APK·단위 테스트·lint·서명 확인, iOS 시뮬레이터 테스트·실제 iPhone arm64
 컴파일 및 서명 전 IPA·Xcode 프로젝트 생성을 추가로 수행합니다.
 
-[GitHub Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 게시된 버전을 확인할 수 있습니다.
+[GitHub Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 게시된 버전을 확인할 수 있으며,
+[릴리즈 단계 분류표](docs/releases/README.md)에서 버전별 구현 범위를 확인할 수 있습니다.
 버전 태그(`vX.Y.Z`) 또는 단계 태그(`phase-NN-vX.Y.Z`, 예: `phase-01-v0.5.0`)를 푸시하면
 테스트를 다시 실행한 뒤 Windows EXE·macOS DMG(arm64/x64)·소스를 한 릴리즈로 자동 게시합니다.
 단계 태그 릴리즈에는 `Phase NN`이 제목에 표시되어 1차 구현, 2차 구현처럼 구분됩니다.
