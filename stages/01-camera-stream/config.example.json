@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "cameras": [
+    {
+      "id": "camera-01",
+      "name": "Camera 01",
+      "input_type": "usb",
+      "source": 0,
+      "timeout_seconds": 5.0,
+      "auto_reconnect": true,
+      "reconnect_delay_seconds": 2.0,
+      "max_reconnect_attempts": 5,
+      "loop_file": false
+    },
+    {
+      "id": "camera-02",
+      "name": "Camera 02",
+      "input_type": "usb",
+      "source": 1,
+      "timeout_seconds": 5.0,
+      "auto_reconnect": true,
+      "reconnect_delay_seconds": 2.0,
+      "max_reconnect_attempts": 5,
+      "loop_file": false
+    }
+  ]
+}
