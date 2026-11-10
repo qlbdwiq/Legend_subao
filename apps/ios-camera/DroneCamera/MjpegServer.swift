@@ -13,6 +13,8 @@ final class MjpegServer {
     private let preferredPort: UInt16?
     var ready: ((UInt16, String) -> Void)?
     var failed: (() -> Void)?
+    /// Live-streaming modes JSON served at /capabilities (token required).
+    var capabilitiesProvider: (() -> Data?)?
 
     init(frames: LatestJpeg, token: String? = nil, port: UInt16? = nil) {
         self.frames = frames; self.token = token ?? ""; self.preferredPort = port
@@ -79,8 +81,24 @@ final class MjpegServer {
             var buffer = buffer; if let data = data { buffer.append(data) }
             if buffer.count > 8192 { self.remove(id); return }
             if buffer.range(of: Data("\r\n\r\n".utf8)) != nil {
-                guard let request = String(data: buffer, encoding: .ascii),
-                      StreamProtocol.authorized(request, token: self.token) else {
+                guard let request = String(data: buffer, encoding: .ascii) else {
+                    connection.send(content: Data("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8),
+                                    completion: .contentProcessed { _ in self.remove(id) })
+                    return
+                }
+                if StreamProtocol.isCapabilitiesRequest(request) {
+                    guard StreamProtocol.authorizedCapabilities(request, token: self.token),
+                          let body = self.capabilitiesProvider?() else {
+                        connection.send(content: Data("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8),
+                                        completion: .contentProcessed { _ in self.remove(id) })
+                        return
+                    }
+                    var response = Data("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)
+                    response.append(body)
+                    connection.send(content: response, completion: .contentProcessed { _ in self.remove(id) })
+                    return
+                }
+                guard StreamProtocol.authorized(request, token: self.token) else {
                     connection.send(content: Data("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8),
                                     completion: .contentProcessed { _ in self.remove(id) })
                     return

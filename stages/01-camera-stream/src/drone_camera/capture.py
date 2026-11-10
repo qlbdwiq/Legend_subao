@@ -57,19 +57,24 @@ class Frame:
 @dataclass(frozen=True)
 class Status:
     state: State
-    fps: float
+    fps: float  # Measured receive/output FPS from actual frame arrivals.
     width: int
     height: int
     last_received: float
     message: str
+    capture_fps: float = 0  # Backend-reported capture FPS; 0 when unknown.
+    requested_width: int = 0
+    requested_height: int = 0
+    requested_fps: int = 0
 
 
 class _Slot:
     def __init__(self, ctx):
         self.lock = ctx.Lock()
         self.pixels = ctx.RawArray("B", MAX_FRAME_BYTES)
-        # sequence, width, height, wall time, monotonic time, fps
-        self.meta = ctx.RawArray("d", 6)
+        # sequence, width, height, wall time, monotonic time, receive fps,
+        # backend-reported capture fps
+        self.meta = ctx.RawArray("d", 7)
         self.state = ctx.RawValue("i", State.CONNECTING)
         self.error = ctx.RawValue("i", 0)
         self.heartbeat = ctx.RawValue("d", time.monotonic())
@@ -81,11 +86,33 @@ def _open_capture(config):
     cv2.setLogLevel(0)
     if config.input_type in ("mjpeg", "rtsp"):
         milliseconds = round(config.timeout_seconds * 1000)
-        return cv2.VideoCapture(config.source, cv2.CAP_FFMPEG, [
+        capture = cv2.VideoCapture(config.source, cv2.CAP_FFMPEG, [
             cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, milliseconds,
             cv2.CAP_PROP_READ_TIMEOUT_MSEC, milliseconds,
         ])
-    return cv2.VideoCapture(config.source)
+        # Prefer the newest frame over a deep backend queue. The remote
+        # phone/server chooses the streamed resolution and frame rate;
+        # requested_* values are expectations verified against arrivals.
+        try:
+            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        return capture
+    capture = cv2.VideoCapture(config.source)
+    if config.input_type == "usb":
+        # Only a locally attached camera can be (re)configured by the
+        # receiver. Backends may ignore or clamp these requests; the
+        # actual frame size and measured FPS remain the source of truth.
+        try:
+            if config.requested_width and config.requested_height:
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.requested_width)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.requested_height)
+            if config.requested_fps:
+                capture.set(cv2.CAP_PROP_FPS, config.requested_fps)
+            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+    return capture
 
 
 def _capture_worker(config: CameraConfig, slot: _Slot, stop):
@@ -108,6 +135,7 @@ def _capture_worker(config: CameraConfig, slot: _Slot, stop):
             if capture.isOpened():
                 samples = deque(maxlen=120)
                 fps = capture.get(cv2.CAP_PROP_FPS)
+                capture_fps = float(fps) if np.isfinite(fps) and 0 < fps <= 1000 else 0.0
                 interval = 1.0 / fps if np.isfinite(fps) and 0 < fps <= 240 else 1.0 / 30
                 deadline = time.monotonic()
                 while not stop.is_set():
@@ -142,7 +170,7 @@ def _capture_worker(config: CameraConfig, slot: _Slot, stop):
                     if slot.lock.acquire(timeout=0.01):
                         try:
                             np.frombuffer(slot.pixels, dtype=np.uint8)[:image.size] = image.reshape(-1)
-                            slot.meta[:] = (sequence, width, height, time.time(), now, actual_fps)
+                            slot.meta[:] = (sequence, width, height, time.time(), now, actual_fps, capture_fps)
                         finally:
                             slot.lock.release()
                     slot.error.value = 0
@@ -182,7 +210,7 @@ class CameraSource:
         self._process = None
         self._stop = None
         self._stopping_at = None
-        self._last_meta = (0, 0, 0, 0, 0, 0)
+        self._last_meta = (0, 0, 0, 0, 0, 0, 0)
         self._override = None
 
     @property
@@ -196,7 +224,7 @@ class CameraSource:
         self._stop = self._ctx.Event()
         self._override = None
         self._stopping_at = None
-        self._last_meta = (0, 0, 0, 0, 0, 0)
+        self._last_meta = (0, 0, 0, 0, 0, 0, 0)
         self._process = self._ctx.Process(target=_capture_worker,
             args=(self.config, self._slot, self._stop), daemon=True, name=self.config.id)
         try:
@@ -246,25 +274,29 @@ class CameraSource:
             self._override = (State.ERROR, 5)
 
     def status(self) -> Status:
+        requested = (self.config.requested_width, self.config.requested_height,
+                     self.config.requested_fps)
         if self._slot is None:
-            return Status(State.DISCONNECTED, 0, 0, 0, 0, "")
+            return Status(State.DISCONNECTED, 0, 0, 0, 0, "", 0, *requested)
         if self._slot.lock.acquire(timeout=0.005):
             try:
                 self._last_meta = tuple(self._slot.meta)
             finally:
                 self._slot.lock.release()
-        _, w, h, _, received, fps = self._last_meta
+        _, w, h, _, received, fps, capture_fps = self._last_meta
         state, error = self._override or (State(self._slot.state.value), self._slot.error.value)
         if state != State.CONNECTED or time.monotonic() - received > 2:
             fps = 0
-        return Status(state, fps, int(w), int(h), received, ERRORS[error])
+            capture_fps = 0
+        return Status(state, fps, int(w), int(h), received, ERRORS[error],
+                      capture_fps, *requested)
 
     def latest_frame(self, after_sequence: int = 0) -> Frame | None:
         slot = self._slot
         if slot is None or not slot.lock.acquire(timeout=0.005):
             return None
         try:
-            sequence, w, h, wall, received, _ = slot.meta
+            sequence, w, h, wall, received, _, _capture_fps = slot.meta
             if sequence <= after_sequence or w == 0 or h == 0:
                 return None
             image = np.frombuffer(slot.pixels, dtype=np.uint8, count=int(w * h * 3)).reshape(
