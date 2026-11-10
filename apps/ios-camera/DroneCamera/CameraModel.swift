@@ -13,7 +13,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     private let context = CIContext(options: [.cacheIntermediates: false])
     private var frames = LatestJpeg()
     private var server: MjpegServer?
-    private var lastEncoded: Double = 0
+    private var nextEncodeAt: Double = 0
     private var generation = UUID()
     private var sessionToken: String?
     private var sessionPort: UInt16?
@@ -74,7 +74,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
                 if let connection = output.connection(with: .video), connection.isVideoOrientationSupported {
                     connection.videoOrientation = .landscapeRight
                 }
-                self.lastEncoded = 0
+                self.nextEncodeAt = 0
             } catch {
                 DispatchQueue.main.async { self.stop(message: "후면 카메라를 열 수 없습니다. 다른 앱의 사용 여부를 확인하세요.") }
                 return
@@ -84,8 +84,8 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastEncoded >= 1.0 / Double(encodingFps), let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        lastEncoded = now
+        guard now >= nextEncodeAt, let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        nextEncodeAt = max(nextEncodeAt + 1.0 / Double(encodingFps), now)
         let image = CIImage(cvPixelBuffer: pixel)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         if let jpeg = context.jpegRepresentation(of: image, colorSpace: colorSpace,
