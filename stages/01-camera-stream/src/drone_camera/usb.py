@@ -59,7 +59,7 @@ def _mux_socket():
 
 
 def _mux_request(stream, message):
-    payload = plistlib.dumps({"ClientVersionString": "DroneCamera-0.2.0", "ProgName": "DroneCamera", **message})
+    payload = plistlib.dumps({"ClientVersionString": "DroneCamera-0.2.0", "ProgName": "DroneCamera", "kLibUSBMuxVersion": 3, **message})
     stream.sendall(struct.pack("<IIII", len(payload) + 16, 1, 8, 1) + payload)
     length, version, kind, tag = struct.unpack("<IIII", _read_exact(stream, 16))
     if not 16 <= length <= 1024 * 1024 or version != 1 or kind != 8 or tag != 1:
@@ -136,7 +136,7 @@ class UsbTunnel:
                         ready, writable, _ = select.select(reads, writes, [], 0.2)
                         for stream in ready:
                             try:
-                                data = stream.recv(32768)
+                                data = stream.recv(min(32768, 65536 - len(pending[opposite[stream]])))
                             except BlockingIOError:
                                 continue
                             if not data:
@@ -216,7 +216,18 @@ class UsbTunnel:
                         raise ValueError
                 except ValueError:
                     raise UsbError("adb가 유효한 전달 포트를 반환하지 않았습니다.") from None
-        return socket.create_connection(("127.0.0.1", self._android_port), timeout=3)
+        try:
+            return socket.create_connection(("127.0.0.1", self._android_port), timeout=3)
+        except OSError:
+            # adb discards forwards when a USB device is unplugged. Recreate on
+            # the next retry instead of caching a dead local port indefinitely.
+            with self._init_lock:
+                try:
+                    self._adb("-s", self._android_serial, "forward", "--remove", f"tcp:{self._android_port}")
+                except UsbError:
+                    pass
+                self._android_port = None
+            raise UsbError("Android USB 전달이 끊겼습니다. 케이블·디버깅 승인을 확인하면 다음 시도에서 다시 연결합니다.") from None
 
     def close(self):
         with self._lock:

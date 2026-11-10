@@ -1,4 +1,4 @@
-name: Publish phase 01 release
+name: Publish desktop and mobile release
 
 # Dispatch only AFTER the PR is merged. Tests run again on the exact release SHA.
 on:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: phase-01-release
+  group: camera-release
   cancel-in-progress: false
 
 jobs:
@@ -32,19 +32,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: drone-camera-*-v0.2.0
+          merge-multiple: true
+          path: dist
       - run: python scripts/package_release.py
       - name: Publish source release without overwriting an existing tag
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.0 >/dev/null 2>&1; then
-            echo "v0.1.0 already exists; refusing to replace it."
+          if gh release view v0.2.0 >/dev/null 2>&1; then
+            echo "v0.2.0 already exists; refusing to replace it."
             exit 1
           fi
-          if git ls-remote --exit-code --tags origin refs/tags/v0.1.0; then
-            echo "v0.1.0 tag already exists; inspect its target before publishing."
+          if git ls-remote --exit-code --tags origin refs/tags/v0.2.0; then
+            echo "v0.2.0 tag already exists; inspect its target before publishing."
             exit 1
           fi
-          gh release create v0.1.0 dist/phase-01-camera-stream-v0.1.0.zip \
-            --target "$GITHUB_SHA" --title "Phase 01 - Dual Camera Streaming" \
-            --notes-file docs/releases/v0.1.0.md
+          test -s dist/drone-camera-android-v0.2.0-debug.apk
+          test -s dist/drone-camera-ios-v0.2.0-unsigned.ipa
+          test -s dist/drone-camera-ios-v0.2.0-xcode-project.zip
+          gh release create v0.2.0 dist/phase-01-camera-stream-v0.2.0.zip dist/drone-camera-* \
+            --target "$GITHUB_SHA" --title "Mobile Cameras - Wi-Fi and USB" \
+            --notes-file docs/releases/v0.2.0.md

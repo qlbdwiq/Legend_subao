@@ -10,18 +10,25 @@ final class MjpegServer {
     private var active = false
     private let frames: LatestJpeg
     private(set) var token = ""
+    private let preferredPort: UInt16?
     var ready: ((UInt16, String) -> Void)?
     var failed: (() -> Void)?
 
-    init(frames: LatestJpeg) { self.frames = frames }
+    init(frames: LatestJpeg, token: String? = nil, port: UInt16? = nil) {
+        self.frames = frames; self.token = token ?? ""; self.preferredPort = port
+    }
 
     func start() throws {
-        var random = [UInt8](repeating: 0, count: 16)
-        guard SecRandomCopyBytes(kSecRandomDefault, random.count, &random) == errSecSuccess else {
-            throw NSError(domain: "DroneCamera", code: 1)
+        if token.isEmpty {
+            var random = [UInt8](repeating: 0, count: 16)
+            guard SecRandomCopyBytes(kSecRandomDefault, random.count, &random) == errSecSuccess else {
+                throw NSError(domain: "DroneCamera", code: 1)
+            }
+            token = random.map { String(format: "%02x", $0) }.joined()
         }
-        token = random.map { String(format: "%02x", $0) }.joined()
-        let listener = try NWListener(using: .tcp, on: .any)
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
+        let listener = try NWListener(using: parameters, on: preferredPort.flatMap(NWEndpoint.Port.init(rawValue:)) ?? .any)
         self.listener = listener
         queue.async { self.active = true }
         listener.stateUpdateHandler = { [weak self, weak listener] state in

@@ -14,6 +14,8 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     private var server: MjpegServer?
     private var lastEncoded: Double = 0
     private var generation = UUID()
+    private var sessionToken: String?
+    private var sessionPort: UInt16?
 
     func start() {
         guard !running else { return }
@@ -29,10 +31,11 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     }
     private func configure(_ generation: UUID) {
         let frames = LatestJpeg()
-        let server = MjpegServer(frames: frames); self.server = server
+        let server = MjpegServer(frames: frames, token: sessionToken, port: sessionPort); self.server = server
         server.ready = { [weak self] port, token in
             DispatchQueue.main.async {
                 guard let self = self, self.running, self.generation == generation else { return }
+                self.sessionPort = port
                 self.url = "http://\(MjpegServer.wifiAddress()):\(port)/stream.mjpg?token=\(token)"
                 self.status = "MJPEG · 최대 1280×720 / 15 FPS · 앱을 열린 상태로 유지"
             }
@@ -41,7 +44,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
             guard let self = self, self.generation == generation else { return }
             self.stop(message: "네트워크 송출을 시작할 수 없습니다. 다시 시작하세요.")
         } }
-        do { try server.start() } catch { stop(message: "네트워크 서버 시작 실패"); return }
+        do { try server.start(); sessionToken = server.token } catch { stop(message: "네트워크 서버 시작 실패"); return }
         UIApplication.shared.isIdleTimerDisabled = true
         captureQueue.async { [weak self] in
             guard let self = self else { return }

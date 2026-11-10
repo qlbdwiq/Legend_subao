@@ -32,6 +32,9 @@ public final class MainActivity extends Activity {
     private volatile boolean streaming;
     private long lastEncoded, previewSequence;
     private int rotation;
+    private long generation;
+    private final String sessionToken = MjpegServer.newToken();
+    private int sessionPort;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -39,6 +42,11 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL);
         column.setPadding(24, 16, 24, 12);
         column.setBackgroundColor(Color.rgb(17, 24, 39));
+        column.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(24+insets.getSystemWindowInsetLeft(),16+insets.getSystemWindowInsetTop(),
+                    24+insets.getSystemWindowInsetRight(),12+insets.getSystemWindowInsetBottom());
+            return insets;
+        });
         TextView title = new TextView(this);
         title.setText("DRONE CAMERA  ·  Android / Galaxy"); title.setTextSize(21); title.setTextColor(Color.WHITE);
         column.addView(title);
@@ -68,8 +76,9 @@ public final class MainActivity extends Activity {
     private void begin() {
         if (streaming) return;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return;
+        final long current = ++generation;
         try {
-            frames = new FrameHub(); server = new MjpegServer(frames);
+            frames = new FrameHub(); server = new MjpegServer(frames, sessionPort, sessionToken); sessionPort = server.port();
             streaming = true; lastEncoded = 0; previewSequence = 0;
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             start.setText("송출 중지 / Stop"); copy.setEnabled(true);
@@ -95,12 +104,12 @@ public final class MainActivity extends Activity {
             reader.setOnImageAvailableListener(this::encode, cameraHandler);
             manager.openCamera(id, new CameraDevice.StateCallback() {
                 @Override public void onOpened(CameraDevice device) {
-                    if (!streaming) { device.close(); return; }
+                    if (!streaming || generation != current) { device.close(); return; }
                     camera = device;
                     try {
                         device.createCaptureSession(Collections.singletonList(reader.getSurface()), new CameraCaptureSession.StateCallback() {
                             @Override public void onConfigured(CameraCaptureSession configured) {
-                                if (!streaming) { configured.close(); return; }
+                                if (!streaming || generation != current) { configured.close(); return; }
                                 session = configured;
                                 try {
                                     CaptureRequest.Builder request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
@@ -108,19 +117,20 @@ public final class MainActivity extends Activity {
                                     request.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
                                     configured.setRepeatingRequest(request.build(), null, cameraHandler);
                                     ui.post(() -> status.setText(size.getWidth()+" × "+size.getHeight()+" · MJPEG 최대 15 FPS · 앱을 열린 상태로 유지"));
-                                } catch (CameraAccessException | IllegalStateException e) { failed(); }
+                                } catch (CameraAccessException | IllegalStateException e) { if (generation == current) failed(); }
                             }
-                            @Override public void onConfigureFailed(CameraCaptureSession ignored) { failed(); }
-                        }, cameraHandler);
-                    } catch (CameraAccessException | IllegalStateException e) { failed(); }
+                            @Override public void onConfigureFailed(CameraCaptureSession ignored) { if (generation == current) failed(); }
+                        }, ui);
+                    } catch (CameraAccessException | IllegalStateException e) { if (generation == current) failed(); }
                 }
-                @Override public void onDisconnected(CameraDevice device) { device.close(); failed(); }
-                @Override public void onError(CameraDevice device, int error) { device.close(); failed(); }
-            }, cameraHandler);
+                @Override public void onDisconnected(CameraDevice device) { device.close(); if (generation == current) failed(); }
+                @Override public void onError(CameraDevice device, int error) { device.close(); if (generation == current) failed(); }
+            }, ui);
             ui.post(previewTick);
         } catch (Exception e) { stop("시작 실패: 카메라 권한, 후면 카메라, 네트워크를 확인하세요."); }
     }
     private void encode(ImageReader source) {
+        if (!streaming || source != reader) return;
         try (Image image = source.acquireLatestImage()) {
             if (image == null || !streaming) return;
             long now = System.nanoTime();
@@ -143,7 +153,7 @@ public final class MainActivity extends Activity {
                 if (bitmap != rotated) bitmap.recycle(); rotated.recycle();
             }
             FrameHub hub = frames;
-            if (streaming && hub != null) hub.publish(jpeg);
+            if (streaming && source == reader && hub != null) hub.publish(jpeg);
         } catch (IllegalStateException e) { if (streaming) failed(); }
     }
     private final Runnable previewTick = new Runnable() {
@@ -170,13 +180,18 @@ public final class MainActivity extends Activity {
         return "127.0.0.1"; // Still usable by the desktop USB tunnel helper.
     }
     private void stop(String message) {
-        streaming = false; ui.removeCallbacks(previewTick);
+        streaming = false; ++generation; ui.removeCallbacks(previewTick);
         if (session != null) { session.close(); session = null; }
         if (camera != null) { camera.close(); camera = null; }
-        if (reader != null) { reader.close(); reader = null; }
+        ImageReader oldReader = reader; reader = null;
+        HandlerThread oldThread = cameraThread;
+        if (cameraHandler != null) cameraHandler.post(() -> {
+            if (oldReader != null) oldReader.close();
+            if (oldThread != null) oldThread.quitSafely();
+        });
         if (server != null) { server.close(); server = null; }
         if (frames != null) { frames.close(); frames = null; }
-        if (cameraThread != null) { cameraThread.quitSafely(); cameraThread = null; }
+        cameraThread = null; cameraHandler = null;
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         start.setText("송출 시작 / Start"); copy.setEnabled(false); address.setText("");
         preview.setImageDrawable(null); status.setText(message);

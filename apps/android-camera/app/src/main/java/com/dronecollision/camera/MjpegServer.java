@@ -19,13 +19,19 @@ public final class MjpegServer implements AutoCloseable {
     private final Thread acceptor;
 
     public MjpegServer(FrameHub frames) throws IOException {
-        this.frames = frames;
-        byte[] random = new byte[16];
-        new SecureRandom().nextBytes(random);
+        this(frames, 0, newToken());
+    }
+    public static String newToken() {
+        byte[] random = new byte[16]; new SecureRandom().nextBytes(random);
         StringBuilder value = new StringBuilder();
         for (byte b : random) value.append(String.format(Locale.ROOT, "%02x", b & 255));
-        token = value.toString();
-        listener = new ServerSocket(0, 4, InetAddress.getByName("0.0.0.0"));
+        return value.toString();
+    }
+    public MjpegServer(FrameHub frames, int port, String sessionToken) throws IOException {
+        this.frames = frames;
+        token = sessionToken;
+        listener = new ServerSocket(); listener.setReuseAddress(true);
+        listener.bind(new InetSocketAddress(InetAddress.getByName("0.0.0.0"), port), 4);
         acceptor = new Thread(this::accept, "camera-http");
         acceptor.setDaemon(true);
         acceptor.start();

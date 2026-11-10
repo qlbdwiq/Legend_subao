@@ -182,6 +182,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.configs = configs
         self.config_path = config_path
+        self.retired_tunnels = []
         self.setup_sources()
         self.sequences = [0, 0]
         self.setWindowTitle("Drone Collision Detection System — Phase 01")
@@ -305,6 +306,7 @@ class MainWindow(QMainWindow):
         for tunnel in self.tunnels:
             if tunnel is not None:
                 tunnel.close()
+                self.retired_tunnels.append(tunnel)
         for source in self.sources:
             source.close()
         self.configs = dialog.result_configs
@@ -352,11 +354,13 @@ class MainWindow(QMainWindow):
     def shutdown(self):
         for source in self.sources:
             source.disconnect()
-        for tunnel in self.tunnels:
+        all_tunnels = self.tunnels + self.retired_tunnels
+        for tunnel in all_tunnels:
             if tunnel is not None:
                 tunnel.close()
         for source in self.sources:
             source.close()
-        for tunnel in self.tunnels:
+        deadline = time.monotonic() + 9
+        for tunnel in all_tunnels:
             if tunnel is not None:
-                tunnel.wait_closed()
+                tunnel.wait_closed(timeout=max(0, deadline - time.monotonic()))

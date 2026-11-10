@@ -25,6 +25,7 @@ def package(app: Path, output: Path):
             if path.is_file() and not any(p in ("xcuserdata", "DerivedData", "build", ".DS_Store") for p in path.parts):
                 archive.write(path, "DroneCamera-iOS/" + path.relative_to(project).as_posix())
         archive.writestr("DroneCamera-iOS/INSTALL.txt", "Open DroneCamera.xcodeproj in Xcode on your Mac.\nSelect Signing & Capabilities > Personal Team, set a unique bundle identifier, select your trusted iPhone, and Run.\nThe unsigned IPA is NOT directly installable.\n")
+        archive.write(ROOT / "docs" / "mobile" / "README.md", "DroneCamera-iOS/INSTALL-KO.md")
 
 
 if __name__ == "__main__":
