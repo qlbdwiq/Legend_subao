@@ -107,6 +107,41 @@ def test_bounded_automatic_retries_and_release(monkeypatch):
     assert slot.state.value == State.ERROR
 
 
+def test_automatic_recovery_after_initial_failure(monkeypatch):
+    ctx = mp.get_context("spawn")
+    slot = capture._Slot(ctx)
+    stop = ctx.Event()
+    attempts = []
+    releases = []
+    class RecoveringCapture:
+        def isOpened(self):
+            return len(attempts) > 1
+        def get(self, _):
+            return 30
+        def read(self):
+            stop.set()  # One successful frame is enough to exercise recovery.
+            return True, np.full((120, 160, 3), 80, np.uint8)
+        def release(self):
+            releases.append(True)
+    def opener(_):
+        attempts.append(True)
+        return RecoveringCapture()
+    monkeypatch.setattr(capture, "_open_capture", opener)
+    config = replace(defaults()[0], max_reconnect_attempts=2, reconnect_delay_seconds=0.1)
+    capture._capture_worker(config, slot, stop)
+    assert len(attempts) == len(releases) == 2
+    assert slot.meta[0] == 1
+    assert slot.meta[1:3] == [160, 120]
+    assert slot.error.value == 0
+
+
+def test_usb_uses_integer_device_backend(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cv2, "VideoCapture", lambda *args: calls.append(args))
+    capture._open_capture(replace(defaults()[0], source=2))
+    assert calls == [(2,)]
+
+
 def _hung_worker(config, slot, stop):
     # Simulates a native backend ignoring timeouts and the stop event.
     time.sleep(120)

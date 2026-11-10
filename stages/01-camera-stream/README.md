@@ -91,7 +91,7 @@ cp stages/01-camera-stream/config.example.json stages/01-camera-stream/config.js
 
 Windows에서는 `.venv/bin/python`을 `.\.venv\Scripts\python.exe`로, 출력 경로를
 `"$env:TEMP\drone-test.avi"`로 바꾸세요. 기존 파일은 덮어쓰지 않습니다.
-릴리즈 ZIP에는 생성기가 포함되지 않을 수 있으며, 이 경우 가지고 있는 동영상을 사용하면 됩니다.
+릴리즈 ZIP에도 생성기가 포함됩니다. 가지고 있는 일반 동영상을 사용해도 됩니다.
 
 설정에서 두 카메라를 모두 `file`로 지정하고 생성한 파일의 절대 경로를 입력합니다.
 **파일 반복**을 켜면 반복 재생합니다. 꺼두면 끝에서 `End of file` 상태가 됩니다.
