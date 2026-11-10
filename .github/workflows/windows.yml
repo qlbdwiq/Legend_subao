@@ -23,6 +23,7 @@ jobs:
       - name: Build single EXE and portable ZIP
         run: python scripts/build_windows.py
       - name: Launch copied EXE without Python or SDK paths; capture two files and two MJPEG inputs
+        shell: bash
         run: python scripts/smoke_windows_exe.py dist/windows/DroneCollisionDetection-v*-windows-x64.exe build/windows/evidence
       - name: Preserve frozen runtime reports and screenshots
         if: always()
