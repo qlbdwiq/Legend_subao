@@ -15,8 +15,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dronecollision.camera
-        MARKETING_VERSION: 0.2.0
-        CURRENT_PROJECT_VERSION: 2
+        MARKETING_VERSION: 0.4.0
+        CURRENT_PROJECT_VERSION: 3
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: DroneCamera/Info.plist
         CODE_SIGN_STYLE: Automatic

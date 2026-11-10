@@ -32,10 +32,10 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose apps/android-camera/app/build/outputs/apk/debug/app-debug.apk
           mkdir -p mobile-dist
-          cp apps/android-camera/app/build/outputs/apk/debug/app-debug.apk mobile-dist/drone-camera-android-v0.2.0-debug.apk
+          cp apps/android-camera/app/build/outputs/apk/debug/app-debug.apk mobile-dist/drone-camera-android-v0.4.0-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: drone-camera-android-v0.2.0
+          name: drone-camera-android-v0.4.0
           path: mobile-dist/*
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
@@ -76,7 +76,7 @@ jobs:
         run: python3 scripts/package_ios.py "$RUNNER_TEMP/ios-device/Build/Products/Release-iphoneos/DroneCamera.app" mobile-dist
       - uses: actions/upload-artifact@v4
         with:
-          name: drone-camera-ios-v0.2.0
+          name: drone-camera-ios-v0.4.0
           path: mobile-dist/*
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

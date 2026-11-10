@@ -60,7 +60,7 @@ def _mux_socket():
 
 
 def _mux_request(stream, message):
-    payload = plistlib.dumps({"ClientVersionString": "DroneCamera-0.2.0", "ProgName": "DroneCamera", "kLibUSBMuxVersion": 3, **message})
+    payload = plistlib.dumps({"ClientVersionString": "DroneCamera-0.4.0", "ProgName": "DroneCamera", "kLibUSBMuxVersion": 3, **message})
     stream.sendall(struct.pack("<IIII", len(payload) + 16, 1, 8, 1) + payload)
     length, version, kind, tag = struct.unpack("<IIII", _read_exact(stream, 16))
     if not 16 <= length <= 1024 * 1024 or version != 1 or kind != 8 or tag != 1:

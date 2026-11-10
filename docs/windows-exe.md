@@ -24,7 +24,7 @@ EXE 내부 라이브러리를 임시 폴더로 푸는 최초 실행에는 시간
 
 Android 도구는 실행 중 잠길 수 있는 공유 서버를 사용하므로 사용자 `LOCALAPPDATA/DroneCollisionDetection/Tools`
 폴더에 무결성을 확인한 사본을 자동으로 준비합니다. 설정이나 개인 영상은 EXE 옆에 쓰지 않습니다.
-기존 모바일 앱은 [v0.2.0](https://github.com/qlbdwiq/Legend_subao/releases/tag/v0.2.0)의 APK/Xcode 프로젝트를 그대로 사용합니다.
+모바일 앱은 최신 [릴리스](https://github.com/qlbdwiq/Legend_subao/releases/latest)의 APK/Xcode 프로젝트를 사용합니다.
 자세한 휴대폰 설치·연결은 [모바일 설명서](https://github.com/qlbdwiq/Legend_subao/blob/main/docs/mobile/README.md)를 참고하세요.
 
 ## 검증과 제한

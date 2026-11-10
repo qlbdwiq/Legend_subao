@@ -96,7 +96,7 @@ CI는 PR과 `main` push에 Windows/macOS Python 3.11·3.12 및 macOS Intel 3.11 
 
 [GitHub Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 게시된 버전을 확인할 수 있습니다.
 `v0.3.0`부터 버전 태그(`vX.Y.Z`)를 푸시하면 테스트를 다시 실행한 뒤 Windows EXE·macOS DMG(arm64/x64)·소스를 한 릴리즈로 게시합니다. `v0.2.1`은 보존됩니다.
-모바일 APK·서명 전 IPA·Xcode 프로젝트는 `v0.2.0` 배포본을 그대로 사용합니다.
+모바일 APK·서명 전 IPA·Xcode 프로젝트는 최신 릴리스에서 함께 제공합니다.
 기존 `v0.1.0` 태그와 게시 파일은 보존합니다.
 태그·릴리즈의 실제 게시 상태는 Releases 페이지를 기준으로 하세요. macOS `.app`은 제공하지 않습니다.
 
