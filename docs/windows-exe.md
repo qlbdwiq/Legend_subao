@@ -46,7 +46,7 @@ Windows에서 Python 3.11 x64 개발 환경을 준비한 뒤 저장소 루트에
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r stages/01-camera-stream/requirements.txt -r packaging/windows/requirements-build.txt
 .\.venv\Scripts\python.exe scripts/build_windows.py
-.\.venv\Scripts\python.exe scripts/smoke_windows_exe.py dist/windows/DroneCollisionDetection-v0.2.1-windows-x64.exe build/windows/evidence
+.\.venv\Scripts\python.exe scripts/smoke_windows_exe.py dist/windows/DroneCollisionDetection-v*-windows-x64.exe build/windows/evidence
 ```
 
 개발 빌드만 Python을 사용하며, 배포된 EXE 사용자에게는 필요 없습니다.

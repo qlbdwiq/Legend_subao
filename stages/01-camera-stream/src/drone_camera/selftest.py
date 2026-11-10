@@ -42,6 +42,13 @@ def run(config_path: Path, report_path: Path) -> int:
             except (OSError, ValueError, subprocess.SubprocessError):
                 result["bundled_adb"] = False
             result["ok"] = result["ok"] and result["bundled_adb"]
+        if ok and sys.platform == "darwin" and getattr(sys, "frozen", False):
+            try:
+                command = subprocess.run([adb_executable(), "version"], capture_output=True, timeout=10)
+                result["bundled_adb"] = command.returncode == 0 and b"Android Debug Bridge" in command.stdout
+            except (OSError, ValueError, TypeError, subprocess.SubprocessError):
+                result["bundled_adb"] = False
+            result["ok"] = result["ok"] and result["bundled_adb"]
         result["ok"] = result["ok"] and result["workers_stopped"] and result["active_children"] == 0
         report_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         app.exit(0 if result["ok"] else 1)
