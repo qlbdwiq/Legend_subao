@@ -1,0 +1,59 @@
+name: Camera streaming CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        python: ['3.11', '3.12']
+        include:
+          - os: macos-15-intel
+            python: '3.11'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+    defaults:
+      run:
+        working-directory: stages/01-camera-stream
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: stages/01-camera-stream/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Syntax and module imports
+        run: |
+          python -m compileall -q src
+          python -c "import sys; sys.path.insert(0, 'src'); import cv2, numpy, PySide6; import drone_camera.config, drone_camera.capture, drone_camera.gui"
+      - name: Validate example configuration
+        run: python src/main.py --validate-config config.example.json
+      - name: Unit, real capture and offscreen GUI tests
+        run: python -m pytest -v --junitxml=test-results.xml
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.python }}
+          path: stages/01-camera-stream/test-results.xml
+          if-no-files-found: warn
+      - name: Build and inspect release source ZIP
+        working-directory: .
+        run: |
+          python scripts/package_release.py
+          python -m zipfile -t dist/phase-01-camera-stream-v0.1.0.zip

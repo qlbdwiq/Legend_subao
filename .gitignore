@@ -15,6 +15,7 @@ config.*.json
 !config.example.json
 *.local.json
 *.log
+test-results.xml
 *.mp4
 *.avi
 *.mov
