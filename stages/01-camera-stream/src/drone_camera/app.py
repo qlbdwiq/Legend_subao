@@ -9,7 +9,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Phase 01 dual camera streaming")
     parser.add_argument("--config", type=Path, help="Configuration JSON; relative video paths use its directory")
     parser.add_argument("--validate-config", type=Path, help="Validate JSON and exit without loading Qt")
+    parser.add_argument("--self-test-report", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.self_test_report:
+        if not args.config:
+            parser.error("--self-test-report requires --config")
+        from .selftest import run
+        return run(args.config.resolve(), args.self_test_report.resolve())
     if args.validate_config:
         try:
             load_config(args.validate_config)

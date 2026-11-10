@@ -8,13 +8,14 @@ from dataclasses import dataclass
 import os
 import plistlib
 import select
-import shutil
 import socket
 import socketserver
 import struct
 import subprocess
 import threading
 from urllib.parse import urlsplit, urlunsplit, parse_qs
+
+from .runtime import adb_executable
 
 
 class UsbError(RuntimeError):
@@ -179,7 +180,10 @@ class UsbTunnel:
         return urlunsplit(("http", f"127.0.0.1:{self.port}", parsed.path, parsed.query, ""))
 
     def _adb(self, *args):
-        adb = shutil.which("adb")
+        try:
+            adb = adb_executable()
+        except (OSError, ValueError, KeyError):
+            raise UsbError("내장 Android USB 도구를 준비할 수 없습니다. 앱을 다시 내려받고 사용자 폴더 권한을 확인하세요.") from None
         if not adb:
             raise UsbError("Android SDK Platform-Tools의 adb를 설치하고 PATH에 추가하세요.")
         try:
