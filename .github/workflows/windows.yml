@@ -23,7 +23,8 @@ jobs:
       - name: Build single EXE and portable ZIP
         run: python scripts/build_windows.py
       - name: Launch copied EXE without Python or SDK paths; capture two files and two MJPEG inputs
-        run: python scripts/smoke_windows_exe.py dist/windows/DroneCollisionDetection-v0.2.1-windows-x64.exe build/windows/evidence
+        shell: bash
+        run: python scripts/smoke_windows_exe.py dist/windows/DroneCollisionDetection-v*-windows-x64.exe build/windows/evidence
       - name: Preserve frozen runtime reports and screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -33,6 +34,6 @@ jobs:
       - name: Upload tested standalone app
         uses: actions/upload-artifact@v4
         with:
-          name: windows-standalone-v0.2.1
+          name: windows-standalone
           path: dist/windows/*
           if-no-files-found: error
