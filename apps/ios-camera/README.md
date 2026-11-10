@@ -1,7 +1,7 @@
 # Drone Camera — iPhone / iPad
 
 SwiftUI, AVFoundation 일반 후면 카메라, CoreImage JPEG, Network.framework TCP 서버를 사용합니다.
-iOS 16+, 최대 1280×720 / 15fps 목표, 최신 프레임 하나와 클라이언트별 하나의 미완료 전송만 유지합니다.
+iOS 16+, 최대 1280×720 / 30fps (15fps 선택 가능) 목표, 최신 프레임 하나와 클라이언트별 하나의 미완료 전송만 유지합니다.
 Wi-Fi 또는 데스크톱의 Apple USB 도우미를 사용합니다. LiDAR/마이크/AI 기능은 없습니다.
 
 **무료 Apple 계정 사용자는 Mac의 Xcode Personal Team으로 직접 서명·설치합니다.**

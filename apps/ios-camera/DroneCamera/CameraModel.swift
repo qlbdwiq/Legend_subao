@@ -7,6 +7,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     @Published var running = false
     @Published var status = "같은 Wi-Fi 또는 USB로 연결 · 후면 카메라"
     @Published var url = ""
+    @Published var targetFps = 30
     let session = AVCaptureSession()
     private let captureQueue = DispatchQueue(label: "camera.capture")
     private let context = CIContext(options: [.cacheIntermediates: false])
@@ -16,6 +17,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     private var generation = UUID()
     private var sessionToken: String?
     private var sessionPort: UInt16?
+    private var encodingFps = 30
 
     func start() {
         guard !running else { return }
@@ -30,6 +32,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
         }
     }
     private func configure(_ generation: UUID) {
+        let requestedFps = targetFps
         let frames = LatestJpeg()
         let server = MjpegServer(frames: frames, token: sessionToken, port: sessionPort); self.server = server
         server.ready = { [weak self] port, token in
@@ -37,7 +40,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
                 guard let self = self, self.running, self.generation == generation else { return }
                 self.sessionPort = port
                 self.url = "http://\(MjpegServer.wifiAddress()):\(port)/stream.mjpg?token=\(token)"
-                self.status = "MJPEG · 최대 1280×720 / 15 FPS · 앱을 열린 상태로 유지"
+                self.status = "MJPEG · 최대 1280×720 / \(requestedFps) FPS · 앱을 열린 상태로 유지"
             }
         }
         server.failed = { [weak self] in DispatchQueue.main.async {
@@ -49,6 +52,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
         captureQueue.async { [weak self] in
             guard let self = self else { return }
             self.frames = frames
+            self.encodingFps = requestedFps
             do {
                 self.session.beginConfiguration()
                 defer { self.session.commitConfiguration() }
@@ -80,7 +84,7 @@ final class CameraModel: NSObject, ObservableObject, AVCaptureVideoDataOutputSam
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastEncoded >= 1.0 / 15, let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard now - lastEncoded >= 1.0 / Double(encodingFps), let pixel = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         lastEncoded = now
         let image = CIImage(cvPixelBuffer: pixel)
         let colorSpace = CGColorSpaceCreateDeviceRGB()

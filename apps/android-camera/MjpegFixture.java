@@ -10,7 +10,7 @@ public class MjpegFixture {
         try (MjpegServer server = new MjpegServer(frames)) {
             System.out.println(server.url("127.0.0.1")); System.out.flush();
             while (!Thread.currentThread().isInterrupted()) {
-                frames.publish(jpeg); Thread.sleep(67);
+                frames.publish(jpeg); Thread.sleep(34);
             }
         } finally { frames.close(); }
     }
