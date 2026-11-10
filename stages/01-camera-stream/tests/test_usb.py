@@ -101,6 +101,24 @@ def test_mux_frames_split_reads_and_connect_port_byte_order(monkeypatch):
             peer.close()
 
 
+def test_android_recreates_forward_after_usb_unplug(monkeypatch):
+    calls = []
+    monkeypatch.setattr(usb.UsbTunnel, "_adb", lambda self, *args: calls.append(args) or "")
+    tunnel = usb.UsbTunnel("android", 8080)
+    tunnel._android_port = 12345
+    tunnel._android_serial = "USB_SERIAL"
+    def disconnected(*args, **kwargs):
+        raise ConnectionRefusedError()
+    monkeypatch.setattr(usb.socket, "create_connection", disconnected)
+    try:
+        with pytest.raises(usb.UsbError):
+            tunnel._connect()
+        assert tunnel._android_port is None
+        assert calls == [("-s", "USB_SERIAL", "forward", "--remove", "tcp:12345")]
+    finally:
+        tunnel.close(); tunnel.wait_closed()
+
+
 def test_ios_never_selects_wifi_device(monkeypatch):
     left, right = socket.socketpair()
     monkeypatch.setattr(usb, "_mux_socket", lambda: left)

@@ -8,6 +8,17 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 public class StreamTest {
+    @Test public void stopAndRestartRetainsTheCopiedUrl() throws Exception {
+        String token = MjpegServer.newToken();
+        int port;
+        String url;
+        try (MjpegServer first = new MjpegServer(new FrameHub(),0,token)) {
+            port = first.port(); url = first.url("127.0.0.1");
+        }
+        try (MjpegServer second = new MjpegServer(new FrameHub(),port,token)) {
+            assertEquals(url, second.url("127.0.0.1"));
+        }
+    }
     @Test public void latestFrameSkipsOldPackets() throws Exception {
         FrameHub frames = new FrameHub();
         byte[] input = {1,2,3}; frames.publish(input); input[0] = 99;
