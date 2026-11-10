@@ -142,6 +142,32 @@ def test_usb_uses_integer_device_backend(monkeypatch):
     assert calls == [(2,)]
 
 
+def test_equal_clock_ticks_do_not_break_stream(monkeypatch):
+    ctx = mp.get_context("spawn")
+    slot = capture._Slot(ctx)
+    stop = ctx.Event()
+    reads = []
+    class BurstCapture:
+        def isOpened(self):
+            return True
+        def get(self, _):
+            return 30
+        def read(self):
+            reads.append(True)
+            if len(reads) == 3:
+                stop.set()
+            return True, np.full((120, 160, 3), 80, np.uint8)
+        def release(self):
+            pass
+    monkeypatch.setattr(capture, "_open_capture", lambda _: BurstCapture())
+    monkeypatch.setattr(capture.time, "perf_counter", lambda: 1.0)
+    capture._capture_worker(defaults()[0], slot, stop)
+    assert len(reads) == 3
+    assert slot.meta[0] == 3
+    assert slot.error.value == 0
+    assert slot.meta[5] == 0  # FPS is initially unknown, not a division error.
+
+
 def _hung_worker(config, slot, stop):
     # Simulates a native backend ignoring timeouts and the stop event.
     time.sleep(120)
@@ -188,7 +214,7 @@ def test_real_http_mjpeg_stream():
                                      str(len(payload)).encode() + b"\r\n\r\n" + payload + b"\r\n")
                     self.wfile.flush()
                     time.sleep(1 / 30)
-            except (BrokenPipeError, ConnectionResetError):
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True

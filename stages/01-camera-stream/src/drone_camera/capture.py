@@ -130,8 +130,13 @@ def _capture_worker(config: CameraConfig, slot: _Slot, stop):
                         slot.error.value = 3
                         slot.state.value = State.ERROR
                         return
-                    samples.append(now)
-                    actual_fps = (len(samples) - 1) / (samples[-1] - samples[0]) if len(samples) > 1 else 0
+                    # On older Windows Python versions monotonic() may have
+                    # ~15 ms resolution. Buffered frames can share a timestamp;
+                    # use the high-resolution performance counter for FPS and
+                    # guard equal ticks rather than treating them as I/O errors.
+                    samples.append(time.perf_counter())
+                    elapsed = samples[-1] - samples[0]
+                    actual_fps = (len(samples) - 1) / elapsed if elapsed > 0 else 0
                     sequence += 1
                     # Drop a frame instead of waiting for a slow consumer.
                     if slot.lock.acquire(timeout=0.01):

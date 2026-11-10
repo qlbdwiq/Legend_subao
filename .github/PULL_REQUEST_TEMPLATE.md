@@ -20,10 +20,12 @@ CI matrix: windows-latest와 macos-latest 각각 Python 3.11/3.12, macos-15-inte
 
 ## 테스트
 
-- 로컬 Linux Python 3.12: pytest **39개 통과**.
+- 로컬 Linux Python 3.12: pytest **40개 통과**.
 - 실제 임시 AVI 두 채널, HTTP MJPEG loopback, FPS·최신 프레임·파일 종료·실패 격리.
 - 자동 재시도·복구, RTSP 타임아웃 전달, USB backend 전달, 멈춘 backend 종료·watchdog.
 - offscreen Qt 초기화·두 채널 표시·비율 유지·독립 해제·종료, 설정 왕복·오류 검증.
+- Windows의 낮은 monotonic clock 해상도에서 같은 시각의 연속 프레임을 처리할 때
+  FPS 계산이 0으로 나뉘지 않도록 고해상도 performance counter와 회귀 테스트를 추가했습니다.
 - 별도 720p30 합성 파일 두 채널 실행: 각각 약 30 FPS, GUI 응답과 모든 worker 종료 확인.
 - 소스 compile/import, 예제 설정 CLI 검증, ZIP 무결성과 압축 해제 후 테스트 확인.
 
