@@ -1,0 +1,55 @@
+name: macOS standalone application
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  dmg:
+    name: macOS ${{ matrix.arch }} app, DMG and mounted-app checks
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest      # Apple Silicon
+          - arch: x64
+            runner: macos-15-intel    # Intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            stages/01-camera-stream/requirements.txt
+            packaging/macos/requirements-build.txt
+      - name: Confirm runner CPU architecture
+        run: |
+          uname -m
+          python -c "import platform; print(platform.machine())"
+      - name: Install application and packaging dependencies
+        run: python -m pip install -r stages/01-camera-stream/requirements.txt -r packaging/macos/requirements-build.txt
+      - name: Build .app and DMG (ad-hoc signed, not notarized)
+        run: python scripts/build_macos.py
+      - name: Mount DMG, copy the app out, and run it on two files and two MJPEG inputs
+        run: python scripts/smoke_macos_app.py dist/macos/DroneCollisionDetection-v*-macos-*.dmg build/macos/evidence
+      - name: Preserve app reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-evidence
+          path: build/macos/evidence/*
+      - name: Upload tested DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-standalone
+          path: dist/macos/*.dmg
+          if-no-files-found: error
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-checksum
+          path: dist/macos/SHA256SUMS-*.txt
+          if-no-files-found: error
