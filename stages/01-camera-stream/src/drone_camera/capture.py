@@ -217,6 +217,9 @@ class CameraSource:
         self._process.join(timeout=0)
         self._process.close()
         self._process = None
+        # Release Event semaphores immediately, including when Qt retains a
+        # closed window through signal cycles. Do not leave cleanup to cyclic GC.
+        self._stop = None
 
     def poll(self):
         if not self.active:
