@@ -1,6 +1,7 @@
 """Qt presentation; acquisition and configuration remain usable without Qt."""
 
 from pathlib import Path
+from dataclasses import replace
 import time
 
 from PySide6.QtCore import Qt, QTimer
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from .capture import CameraSource, State
 from .config import CameraConfig, ConfigError, resolved_config, save_config
+from .usb import UsbError, UsbTunnel, companion_url
 
 
 class VideoView(QLabel):
@@ -53,12 +55,19 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(700)
         self.configs = configs
         self.result_configs = None
+        self.transports = []
+        self.serials = [c.usb_serial for c in configs]
         self.fields = []
         layout = QVBoxLayout(self)
         columns = QHBoxLayout()
-        for config in configs:
+        for index, config in enumerate(configs):
             group = QGroupBox(config.id)
             form = QFormLayout(group)
+            transport = QComboBox()
+            transport.addItems(["Wi-Fi / 일반 입력", "Android USB", "iPhone USB"])
+            transport.setCurrentIndex(["", "android", "ios"].index(config.usb_platform))
+            self.transports.append(transport)
+            form.addRow("연결 방식", transport)
             name = QLineEdit(config.name)
             kind = QComboBox()
             kind.addItems(["mjpeg", "rtsp", "usb", "file"])
@@ -94,9 +103,12 @@ class SettingsDialog(QDialog):
                 ("최대 재시도 / Attempts", attempts), ("파일 반복 / Loop file", loop)):
                 form.addRow(label, widget)
             self.fields.append((name, kind, source, timeout, retry, delay, attempts, loop))
+            usb = QPushButton("유선 USB 연결 도우미")
+            usb.clicked.connect(lambda checked=False, i=index: self.configure_usb(i))
+            form.addRow(usb)
             columns.addWidget(group)
         layout.addLayout(columns)
-        notice = QLabel("iOS/Android 스트리밍 앱의 직접 MJPEG/RTSP 주소를 입력하세요.\n"
+        notice = QLabel("Drone Camera 앱의 연결 주소를 입력하고 mjpeg를 선택하세요. 유선은 USB 연결 도우미를 사용하세요.\n"
                         "설정은 이 컴퓨터에 저장됩니다. URL에 포함된 비밀번호도 저장되므로 공유하지 마세요.")
         notice.setWordWrap(True)
         layout.addWidget(notice)
@@ -108,7 +120,7 @@ class SettingsDialog(QDialog):
     def _validate(self):
         result = []
         try:
-            for config, fields in zip(self.configs, self.fields):
+            for index, (config, fields) in enumerate(zip(self.configs, self.fields)):
                 name, kind, source, timeout, retry, delay, attempts, loop = fields
                 value = source.text().strip()
                 if kind.currentText() == "usb":
@@ -117,13 +129,42 @@ class SettingsDialog(QDialog):
                     except ValueError:
                         raise ConfigError("USB 입력에는 장치 번호를 입력하세요 (0–99).") from None
                 result.append(CameraConfig(config.id, name.text().strip(), kind.currentText(), value,
-                    timeout.value(), retry.isChecked(), delay.value(), attempts.value(), loop.isChecked()))
+                    timeout.value(), retry.isChecked(), delay.value(), attempts.value(), loop.isChecked(),
+                    ["", "android", "ios"][self.transports[index].currentIndex()], self.serials[index]))
         except ConfigError as error:
             QMessageBox.warning(self, "설정 확인", str(error))
             return
         self.result_configs = result
         self.accept()
 
+    def configure_usb(self, index):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("USB 연결 — Wi-Fi 없이 사용 가능")
+        form = QFormLayout(dialog)
+        platform = QComboBox(); platform.addItems(["Android / Galaxy", "iPhone / iPad"])
+        address = QLineEdit(); address.setPlaceholderText("휴대폰 앱의 전체 URL (token 포함)")
+        address.setEchoMode(QLineEdit.EchoMode.Password)
+        serial = QLineEdit(); serial.setPlaceholderText("한 대면 비워두기; 여러 대면 adb serial / iPhone UDID")
+        notice = QLabel("Android: Platform-Tools adb + USB 디버깅 승인\niPhone: 잠금 해제 + 컴퓨터 신뢰 (Windows: Apple Devices/iTunes 드라이버)\n"
+                        "앱에서 송출을 시작하고 주소를 붙여 넣으세요. 연결 확인은 영상 수신 시 수행합니다.")
+        notice.setWordWrap(True)
+        form.addRow(notice); form.addRow("휴대폰", platform); form.addRow("앱 연결 주소", address); form.addRow("장치 번호 (선택)", serial)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        form.addRow(buttons)
+        buttons.rejected.connect(dialog.reject)
+        def apply():
+            try:
+                companion_url(address.text())
+            except UsbError as error:
+                QMessageBox.warning(dialog, "USB 설정", str(error))
+                return
+            self.transports[index].setCurrentIndex(platform.currentIndex() + 1)
+            self.serials[index] = serial.text().strip()
+            self.fields[index][1].setCurrentText("mjpeg")
+            self.fields[index][2].setText(address.text().strip())
+            dialog.accept()
+        buttons.accepted.connect(apply)
+        dialog.exec()
 
 STATE_LABELS = {
     State.DISCONNECTED: "연결 대기 / Disconnected",
@@ -141,7 +182,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.configs = configs
         self.config_path = config_path
-        self.sources = [CameraSource(resolved_config(c, config_path.parent)) for c in configs]
+        self.retired_tunnels = []
+        self.setup_sources()
         self.sequences = [0, 0]
         self.setWindowTitle("Drone Collision Detection System — Phase 01")
         self.resize(1280, 760)
@@ -217,6 +259,24 @@ class MainWindow(QMainWindow):
             self.sequences[index] = 0
             self.sources[index].connect()
 
+    def setup_sources(self):
+        self.sources, self.tunnels, self.usb_errors = [], [], []
+        for config in self.configs:
+            tunnel = None
+            error = ""
+            runtime = resolved_config(config, self.config_path.parent)
+            if config.usb_platform:
+                try:
+                    tunnel = UsbTunnel(config.usb_platform, companion_url(str(config.source)).port, config.usb_serial)
+                    runtime = replace(runtime, source=tunnel.rewrite(str(config.source)), usb_platform="")
+                except (UsbError, OSError):
+                    # Do not silently fall back to Wi-Fi when USB was requested.
+                    error = "USB 전달 포트를 열 수 없습니다. 설정을 다시 저장하세요."
+                    runtime = replace(runtime, source="http://127.0.0.1:1/stream.mjpg", usb_platform="")
+            self.sources.append(CameraSource(runtime))
+            self.tunnels.append(tunnel)
+            self.usb_errors.append(error)
+
     def toggle(self, index):
         if self.sources[index].active:
             self.sources[index].disconnect()
@@ -243,10 +303,14 @@ class MainWindow(QMainWindow):
         except OSError:
             QMessageBox.warning(self, "저장 오류", "설정 파일을 저장할 수 없습니다. 폴더 쓰기 권한을 확인하세요.")
             return
+        for tunnel in self.tunnels:
+            if tunnel is not None:
+                tunnel.close()
+                self.retired_tunnels.append(tunnel)
         for source in self.sources:
             source.close()
         self.configs = dialog.result_configs
-        self.sources = [CameraSource(resolved_config(c, self.config_path.parent)) for c in self.configs]
+        self.setup_sources()
         self.sequences = [0, 0]
         self.refresh()
 
@@ -270,7 +334,7 @@ class MainWindow(QMainWindow):
             self.details[i].setText(
                 f"{self.configs[i].name}  ·  {self.configs[i].input_type.upper()}\n"
                 f"{status.fps:.1f} FPS  ·  {resolution}  ·  마지막 수신 / Last frame: {age}\n"
-                f"{label}\n{status.message}")
+                f"{label}\n{self.usb_errors[i] or (self.tunnels[i].error if self.tunnels[i] and self.tunnels[i].error else status.message)}")
             self.buttons[i].setText(f"Camera {i + 1:02d} " + ("해제 / Disconnect" if source.active else "연결 / Connect"))
             self.buttons[i].setEnabled(status.state != State.STOPPING)
         self.summary.setText(f"{connected} / 2 CONNECTED\n" + (
@@ -278,14 +342,25 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.timer.stop()
-        for source in self.sources:
-            source.disconnect()
         try:
-            for source in self.sources:
-                source.close()
+            self.shutdown()
         except RuntimeError as error:
             QMessageBox.warning(self, "종료 오류", str(error))
             self.timer.start(33)
             event.ignore()
             return
         event.accept()
+
+    def shutdown(self):
+        for source in self.sources:
+            source.disconnect()
+        all_tunnels = self.tunnels + self.retired_tunnels
+        for tunnel in all_tunnels:
+            if tunnel is not None:
+                tunnel.close()
+        for source in self.sources:
+            source.close()
+        deadline = time.monotonic() + 9
+        for tunnel in all_tunnels:
+            if tunnel is not None:
+                tunnel.wait_closed(timeout=max(0, deadline - time.monotonic()))

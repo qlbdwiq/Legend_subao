@@ -19,6 +19,8 @@ LiDAR는 사용하지 않습니다. **현재 구현 범위는 1단계: 두 카�
 
 ```text
 .github/workflows/      Windows/macOS CI 및 수동 릴리즈 워크플로
+apps/android-camera/    Galaxy/Android Camera2 송출 앱, APK 빌드
+apps/ios-camera/        iPhone/iPad AVFoundation 송출 앱, Xcode 프로젝트
 stages/01-camera-stream/
   src/drone_camera/     Qt와 독립된 설정·영상 소스 모듈, Qt GUI
   src/main.py           실행 진입점
@@ -27,13 +29,18 @@ stages/01-camera-stream/
   requirements.txt
   README.md
 docs/roadmap.md
-docs/releases/v0.1.0.md  릴리즈 노트 원고
+docs/mobile/README.md   모바일 설치 및 Wi-Fi·USB 연결
+docs/releases/          버전별 릴리즈 노트
 scripts/                합성 테스트 영상 및 소스 ZIP 생성
 ```
 
-카메라 장치는 iPhone, iPad, Android 또는 USB 웹캠을 사용할 수 있습니다. 휴대폰·태블릿은
-직접 MJPEG/RTSP 주소를 제공하는 별도 스트리밍 앱이 필요합니다. iOS/Android 기본 카메라
-앱이나 브라우저 시청 페이지가 스트림을 제공한다고 가정하지 않습니다.
+카메라 장치는 iPhone, iPad, Android 또는 USB 웹캠을 사용할 수 있습니다.
+**자체 Drone Camera 모바일 앱과 Wi-Fi·USB 연결**을 `v0.2.0`에 추가했습니다.
+Android는 개발용 서명 APK, iPhone은 무료 Apple 계정으로 직접 설치할 Xcode 프로젝트와
+서명 전 IPA를 제공합니다. **서명 전 IPA는 그대로 설치할 수 없습니다.**
+[설치 및 무선·유선 연결 안내](docs/mobile/README.md)를 참고하세요.
+기존 외부 MJPEG/RTSP 앱 입력도 계속 지원하며, 기본 카메라 앱이나 브라우저 시청 페이지를
+직접 스트림으로 가정하지 않습니다.
 
 ## 빠른 시작
 
@@ -73,12 +80,16 @@ python3.11 -m venv .venv
 CI는 PR과 `main` push에 Windows/macOS Python 3.11·3.12 및 macOS Intel 3.11 검사를
 실행하도록 구성되어 있습니다. CI 설정 파일의 존재는 실행 성공을 의미하지 않습니다.
 실제 통과 상태는 저장소 Actions 및 PR checks에서 확인해야 합니다.
+모바일 CI는 Android APK·단위 테스트·lint·서명 확인, iOS 시뮬레이터 테스트·실제 iPhone arm64
+컴파일 및 서명 전 IPA·Xcode 프로젝트 생성을 추가로 수행합니다.
 
 [GitHub Releases](https://github.com/qlbdwiq/Legend_subao/releases)에서 게시된 버전을 확인할 수 있습니다.
-`v0.1.0` 릴리즈용 소스 ZIP 생성기와 기본 브랜치 전용 수동 게시 워크플로를 제공합니다.
+`v0.2.0`용 데스크톱 소스 ZIP·APK·서명 전 IPA·Xcode 프로젝트를 기본 브랜치 전용 워크플로에서 생성합니다.
+기존 `v0.1.0` 태그와 게시 파일은 보존합니다.
 태그·릴리즈의 실제 게시 상태는 Releases 페이지를 기준으로 하세요. `.exe` / `.app`은 제공하지 않습니다.
 
 로컬 합성 영상·MJPEG 테스트나 CI 통과는 실제 iPhone/Android 스트림, USB 드라이버 또는
-모든 Windows/macOS 장비에서의 성능을 보장하지 않습니다. 720p30 두 채널은 실장비 검증 목표입니다.
+모든 Windows/macOS 장비에서의 성능을 보장하지 않습니다. 수신기의 720p30 두 채널은 실장비 검증 목표이며,
+현재 자체 모바일 앱 송출은 CPU·발열을 고려하여 최대 720p30을 목표로 하며 부하를 낮추는 15fps 선택을 제공합니다.
 
 라이선스: [MIT](LICENSE). 향후 계획: [로드맵](docs/roadmap.md).
