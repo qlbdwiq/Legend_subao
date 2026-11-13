@@ -28,8 +28,10 @@ jobs:
       - name: Build single EXE and portable ZIP
         run: python scripts/build_windows.py
       - name: Launch copied EXE without Python or SDK paths; capture two files and two MJPEG inputs
-        shell: bash
-        run: python scripts/smoke_windows_exe.py dist/windows/DroneCollisionDetection-v*-windows-x64.exe build/windows/evidence
+        # PowerShell (the Windows default): works on runners without Git Bash.
+        run: |
+          $exe = Get-ChildItem dist/windows/DroneCollisionDetection-v*-windows-x64.exe | Select-Object -First 1
+          python scripts/smoke_windows_exe.py $exe.FullName build/windows/evidence
       - name: Preserve frozen runtime reports and screenshots
         if: always()
         uses: actions/upload-artifact@v4
