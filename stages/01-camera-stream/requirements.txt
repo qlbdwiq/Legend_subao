@@ -1,4 +1,23 @@
-numpy==2.2.6
+# Application + tests. Phase 02 adds the AI runtime (PyTorch and friends) below.
+# Install with:   python -m pip install -r requirements.txt
+#                 python -m pip install --no-deps -r requirements-ultralytics.txt
+# (Ultralytics must be installed with --no-deps: it would otherwise pull in the non-headless
+#  opencv-python, which conflicts with opencv-python-headless and PySide6's Qt.)
+numpy==2.3.5; sys_platform != "darwin" or platform_machine != "x86_64"
+numpy==1.26.4; sys_platform == "darwin" and platform_machine == "x86_64"
 opencv-python-headless==4.11.0.86
 PySide6==6.8.3
 pytest==8.3.5
+
+# --- AI runtime (YOLO11 + ByteTrack). Windows wheels from PyPI are CPU-only; macOS arm64 wheels include MPS.
+# PyTorch 2.3+ has no Intel-Mac wheels, so Intel Macs use the last supported release (2.2.2, needs NumPy 1.x).
+torch==2.15.0; sys_platform != "darwin" or platform_machine != "x86_64"
+torchvision==0.29.2; sys_platform != "darwin" or platform_machine != "x86_64"
+torch==2.2.2; sys_platform == "darwin" and platform_machine == "x86_64"
+torchvision==0.17.2; sys_platform == "darwin" and platform_machine == "x86_64"
+lap==0.5.14
+pillow==13.0.0
+requests==2.34.2
+pyyaml==6.0.3
+psutil==7.2.2
+ultralytics-thop==2.2.5

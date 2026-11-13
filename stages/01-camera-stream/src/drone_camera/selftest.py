@@ -1,10 +1,31 @@
 """Frozen-app integration probe used by Windows CI; never needs a camera."""
 import json
 import multiprocessing
+import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+
+
+def model_check(config_path: Path) -> dict:
+    """Optional real-model check: DRONE_SELFTEST_MODEL (.pt) and DRONE_SELFTEST_IMAGE (a drone photo)."""
+    model, image = os.environ.get("DRONE_SELFTEST_MODEL"), os.environ.get("DRONE_SELFTEST_IMAGE")
+    if not model or not image:
+        return {"ok": True, "configured": False}
+    try:
+        import cv2
+        from .engine import YoloTrackerEngine
+        engine = YoloTrackerEngine(model, "cpu", config_path.parent / "ultralytics")
+        info = engine.load()
+        picture = cv2.imread(image)
+        detections = engine.track(picture, 0.25, 0.5, 960)
+        return {"ok": info.names == {0: "drone"} and len(detections) >= 1, "configured": True,
+                "names": {str(k): v for k, v in info.names.items()}, "device": info.device,
+                "detections": len(detections), "ultralytics": info.ultralytics_version,
+                "torch": info.torch_version}
+    except Exception as error:
+        return {"ok": False, "configured": True, "error": f"{type(error).__name__}: {error}"[:300]}
 
 
 def run(config_path: Path, report_path: Path) -> int:
@@ -50,6 +71,14 @@ def run(config_path: Path, report_path: Path) -> int:
                 result["bundled_adb"] = False
             result["ok"] = result["ok"] and result["bundled_adb"]
         result["ok"] = result["ok"] and result["workers_stopped"] and result["active_children"] == 0
+        if ok:
+            # Phase 02: prove torch, torchvision NMS, bundled Ultralytics config files, lap and
+            # ByteTrack work inside this (frozen) build. Random weights: says nothing about accuracy.
+            from .engine import runtime_report
+            result["ai_runtime"] = runtime_report(config_path.parent / "ultralytics")
+            result["ok"] = result["ok"] and result["ai_runtime"]["ok"]
+            result["model_check"] = model_check(config_path)
+            result["ok"] = result["ok"] and result["model_check"].get("ok", True)
         report_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         app.exit(0 if result["ok"] else 1)
 

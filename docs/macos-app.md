@@ -3,6 +3,9 @@
 Python을 따로 설치하지 않아도 실행되는 **macOS 11 이상** 앱을 `.dmg`로 제공합니다.
 Windows EXE와 같은 소스·기능(두 카메라 수신, Wi-Fi, Android USB)을 사용합니다.
 
+> **v0.5.0부터 AI 탐지(PyTorch·Ultralytics)가 포함되어 파일이 훨씬 큽니다.** 학습된 모델(`best.pt`)은 앱에 들어 있지 않으며
+> 프로그램의 **모델 불러오기**로 직접 선택합니다. [AI 탐지 설명서](ai-detection.md)
+
 ## 어떤 파일을 받나요?
 
 | Mac | 파일 |

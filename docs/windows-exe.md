@@ -3,6 +3,9 @@
 Windows 10/11 **x86-64**용 단일 EXE입니다. Python·pip·OpenCV·PySide6를 따로 설치할 필요가 없습니다.
 Windows ARM 및 macOS에서 실행할 EXE는 아닙니다. macOS는 기존 Python 소스를 사용합니다.
 
+> **v0.5.0부터 AI 탐지(CPU용 PyTorch·Ultralytics)가 포함되어 EXE가 훨씬 크고 첫 실행이 더 오래 걸립니다.** 학습된 모델(`best.pt`)은
+> 포함되어 있지 않으며 **모델 불러오기**로 선택합니다. EXE는 CPU 전용입니다. [AI 탐지 설명서](ai-detection.md)
+
 1. [v0.2.1 릴리즈](https://github.com/qlbdwiq/Legend_subao/releases/tag/v0.2.1)에서
    `DroneCollisionDetection-v0.2.1-windows-x64.exe`를 내려받습니다.
 2. EXE를 더블클릭합니다. 관리자 권한·Python 설치·가상환경 활성화는 필요하지 않습니다.
