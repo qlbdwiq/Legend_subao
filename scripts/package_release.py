@@ -20,9 +20,9 @@ def package(output: Path | None = None, version: str = __version__) -> Path:
     paths = [ROOT / "docs" / "macos-app.md", ROOT / "LICENSE", ROOT / "README.md", ROOT / "docs" / "roadmap.md",
              ROOT / "docs" / "releases" / f"v{version}.md",
              ROOT / "docs" / "mobile" / "README.md",
-             ROOT / "docs" / "windows-exe.md",
+             ROOT / "docs" / "windows-exe.md", ROOT / "docs" / "ai-detection.md",
              ROOT / "scripts" / "make_test_video.py", ROOT / "scripts" / "package_release.py",
-             STAGE / "requirements.txt", STAGE / "config.example.json",
+             STAGE / "requirements.txt", STAGE / "requirements-ultralytics.txt", STAGE / "config.example.json",
              STAGE / "README.md", STAGE / "pytest.ini"]
     paths += sorted((STAGE / "src").rglob("*.py"))
     paths += sorted((STAGE / "tests").rglob("*.py"))

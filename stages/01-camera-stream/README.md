@@ -1,7 +1,9 @@
 # Phase 01 — Cross-platform Dual Camera Streaming
 
-두 영상만 수신·표시하는 데스크톱 프로그램입니다. iPhone/iPad/Android의 스트리밍 앱,
-USB 웹캠, 로컬 동영상을 혼합해 사용할 수 있습니다. LiDAR·YOLO·3D·충돌 경고는 포함하지 않습니다.
+> `v0.5.0`부터 같은 프로그램에 **Phase 02 AI 탐지·추적**이 추가되었습니다. [설명서](../../docs/ai-detection.md). 아래는 카메라 수신(1단계) 설명입니다.
+
+두 영상을 수신·표시하는 데스크톱 프로그램입니다. iPhone/iPad/Android의 스트리밍 앱,
+USB 웹캠, 로컬 동영상을 혼합해 사용할 수 있습니다. AI 탐지를 꺼두면 이전과 동일하게 동작합니다. LiDAR·3D·충돌 경고는 포함하지 않습니다.
 
 `v0.2.0`부터 자체 **Drone Camera** 앱과 휴대폰 USB 연결을 지원합니다.
 [Android APK·iPhone 무료 계정 설치 및 Wi-Fi/USB 안내](../../docs/mobile/README.md)를 먼저 참고하세요.
@@ -21,6 +23,7 @@ Python.org의 **Python 3.11 또는 3.12 x86-64**를 설치합니다. PowerShell�
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r stages/01-camera-stream/requirements.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps -r stages/01-camera-stream/requirements-ultralytics.txt
 .\.venv\Scripts\python.exe stages/01-camera-stream/src/main.py
 ```
 
@@ -37,13 +40,14 @@ Apple Silicon에서는 native arm64 Python, Intel에서는 x86-64 Python을 권�
 ```bash
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -r stages/01-camera-stream/requirements.txt
+.venv/bin/python -m pip install --no-deps -r stages/01-camera-stream/requirements-ultralytics.txt
 .venv/bin/python stages/01-camera-stream/src/main.py
 ```
 
 터미널/Python의 카메라 사용 요청을 허용하세요. **시스템 설정 → 개인정보 보호 및 보안 → 카메라**와
 해당되는 macOS 버전의 **로컬 네트워크** 권한도 확인하세요. 의존성 휠을 받을 수 있는 macOS 버전이
 필요합니다(PySide6 6.8 계열은 macOS 12 이상을 권장). Intel 지원은 CI 및 실제 장비 확인 범위에서 판단합니다.
-GPU·CUDA·별도 iOS/Android 앱 빌드는 필요하지 않습니다.
+GPU·CUDA(선택)·별도 iOS/Android 앱 빌드는 필요하지 않습니다.
 
 ## iPhone / iPad / Android 스트림 준비
 

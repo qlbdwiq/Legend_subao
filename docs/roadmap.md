@@ -8,8 +8,10 @@
    수신 FPS·상태·설정, Windows/macOS GUI, 테스트와 문서. 현재 작업 범위입니다.
    `v0.2.0`은 이 단계의 입력 확장으로 Android/iPhone 자체 송출 앱, Wi-Fi·USB 전송을 추가합니다.
    이후 AI·3D 단계를 앞당겨 구현하지 않습니다.
-2. **02 — YOLO detection**: Mavic Mini 인식 데이터셋, 모델 평가, 카메라별 추적 ID.
-   1단계의 영상을 독립 소비하되 GUI/수신 주기를 막지 않도록 설계합니다. 아직 구현하지 않습니다.
+2. **02 — YOLO detection** (`v0.5.0`, 2D): 학습된 YOLO11n(`best.pt`)로 카메라별 탐지, Ultralytics ByteTrack
+   카메라별 추적 ID, 바운딩 서클(중심·반지름)과 후속 단계용 데이터 구조. 1단계의 최신 프레임을 별도 AI 스레드가
+   소비하므로 GUI/수신 주기를 막지 않습니다. [설명서](ai-detection.md). 실제 드론 비행 검증은 아직 남아 있습니다.
+   카메라 간 대응·3D 좌표·거리·충돌 경고는 포함하지 않습니다.
 3. **03 — 3D tracking**: 카메라 내부·외부 보정, 렌즈 왜곡, 스테레오 대응점과 삼각측량,
    좌표계·단위·정확도 평가. 일반 후면 카메라만 사용하고 LiDAR는 사용하지 않습니다.
 4. **04 — Collision warning**: 두 드론 거리·접근 속도·불확실성 기반 위험 기준과 경고.
@@ -18,6 +20,8 @@
 
 ## 실제 장비 검증 과제
 
+- (Phase 02) 실제 비행 영상에서 탐지율·오탐·작은/먼 드론·프로펠러·역광, 두 드론 교차 시 ID 유지, Windows CPU PC의 AI FPS,
+  Intel Mac(torch 2.2.2) 및 CUDA PC 동작.
 - iOS device와 두 번째 iOS 또는 Android 장치의 앱·코덱·MJPEG/RTSP 주소 확인.
 - 같은 LAN에서 AP 클라이언트 격리·방화벽·장치 절전·화면 잠금·스트림 인증 확인.
 - Windows 10/11, Apple Silicon, 가능한 Intel Mac에서 권한·USB 드라이버·백엔드 점검.

@@ -27,8 +27,8 @@ jobs:
         include:
           - os: macos-15-intel
             python: '3.11'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    runs-on: ${{ (matrix.os == 'windows-latest' && vars.WINDOWS_RUNNER) && fromJSON(vars.WINDOWS_RUNNER) || matrix.os }}
+    timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
     defaults:
@@ -40,16 +40,23 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: stages/01-camera-stream/requirements.txt
+          cache-dependency-path: |
+            stages/01-camera-stream/requirements.txt
+            stages/01-camera-stream/requirements-ultralytics.txt
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        # Ultralytics is installed with --no-deps so it cannot pull in the non-headless opencv-python.
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install --no-deps -r requirements-ultralytics.txt
       - name: Syntax and module imports
         run: |
           python -m compileall -q src
-          python -c "import sys; sys.path.insert(0, 'src'); import cv2, numpy, PySide6; import drone_camera.config, drone_camera.capture, drone_camera.gui"
+          python -c "import sys; sys.path.insert(0, 'src'); import cv2, numpy, PySide6, torch, torchvision, ultralytics, lap; import drone_camera.config, drone_camera.capture, drone_camera.gui, drone_camera.engine, drone_camera.ai_pipeline"
       - name: Validate example configuration
         run: python src/main.py --validate-config config.example.json
-      - name: Unit, real capture and offscreen GUI tests
+      # real_model tests need the trained best.pt, which is not in the repository: they are skipped
+      # here and run locally with DRONE_YOLO_MODEL / DRONE_YOLO_SAMPLES (see docs/ai-detection.md).
+      - name: Unit, real capture, AI runtime and offscreen GUI tests
         run: python -m pytest -v --junitxml=test-results.xml
       - name: Preserve test results
         if: always()
