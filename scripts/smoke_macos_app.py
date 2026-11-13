@@ -53,6 +53,9 @@ def main(dmg: Path, evidence: Path):
         assert os.access(adb, os.X_OK)
 
         env = {"HOME": str(folder / "home"), "PATH": "/usr/bin:/bin", "LANG": "ko_KR.UTF-8"}
+        for name in ("DRONE_SELFTEST_MODEL", "DRONE_SELFTEST_IMAGE"):   # optional real-model check
+            if os.environ.get(name):
+                env[name] = os.environ[name]
         (folder / "home").mkdir()
         video = folder / "테스트 영상.avi"
         writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"MJPG"), 30, (1280, 720))
@@ -71,12 +74,14 @@ def main(dmg: Path, evidence: Path):
             report = evidence.resolve() / (name + ".json")
             report.unlink(missing_ok=True)
             result = subprocess.run([str(binary), "--config", str(config), "--self-test-report", str(report)],
-                                    cwd=folder, env=env, timeout=120)
+                                    cwd=folder, env=env, timeout=420)
             assert report.is_file(), f"App did not write {name} report (exit {result.returncode})"
             data = json.loads(report.read_text(encoding="utf-8"))
             print(name, json.dumps(data))
             assert result.returncode == 0 and data["ok"] and data["frozen"] and data["bundled_adb"]
             assert data["workers_stopped"] and data["active_children"] == 0
+            assert data["ai_runtime"]["ok"] and len(set(data["ai_runtime"]["bytetrack_ids"])) == 2, data["ai_runtime"]
+            assert data["model_check"]["ok"], data["model_check"]
             assert len(data["cameras"]) == 2 and all(c["frames"] >= 5 for c in data["cameras"])
 
         run("file", video.name, "dual-file")

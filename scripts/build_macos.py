@@ -21,6 +21,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "stages/01-camera-stream/src"))
 from drone_camera import __version__
 
+
+def torchvision_binaries():
+    """--add-binary args for torchvision's own extension libraries (e.g. _C_stable.so / *.pyd).
+
+    PyInstaller's torchvision hook only knows the old ``torchvision._C`` name and its dynamic
+    library patterns skip these files, so they would silently be missing from the bundle."""
+    import importlib.util
+    root = Path(importlib.util.find_spec("torchvision").submodule_search_locations[0])
+    found = sorted(p for p in root.iterdir() if p.is_file() and p.suffix in (".so", ".pyd", ".dll", ".dylib"))
+    if not found:
+        raise RuntimeError("torchvision extension libraries not found; torchvision::nms would be missing")
+    return [arg for p in found for arg in ("--add-binary", f"{p}:torchvision")]
+
 APP_NAME = "DroneCollisionDetection"
 BUNDLE_ID = "com.dronecollision.detection"
 
@@ -47,7 +60,8 @@ def main():
         for name in ("platform-tools/adb", "platform-tools/NOTICE.txt", "platform-tools/source.properties"):
             (tools / Path(name).name).write_bytes(source.read(name))
     (tools / "adb").chmod(0o755)
-    for name in ("numpy", "opencv-python-headless", "PySide6", "PySide6-Essentials", "PySide6-Addons", "shiboken6", "pyinstaller"):
+    for name in ("numpy", "opencv-python-headless", "PySide6", "PySide6-Essentials", "PySide6-Addons", "shiboken6", "pyinstaller",
+                 "torch", "torchvision", "ultralytics", "ultralytics-thop", "lap", "pillow", "pyyaml", "psutil", "requests"):
         distribution = metadata.distribution(name)
         for file in distribution.files or []:
             if any(part.lower().startswith(("license", "copying", "notice", "copyright")) for part in file.parts):
@@ -61,6 +75,11 @@ def main():
                     "--name", APP_NAME, "--osx-bundle-identifier", BUNDLE_ID,
                     "--paths", str(ROOT / "stages/01-camera-stream/src"),
                     "--exclude-module", "pytest", "--exclude-module", "tkinter",
+                    # Ultralytics loads model/tracker modules lazily; PyInstaller cannot see them statically.
+                    "--collect-submodules", "ultralytics", "--copy-metadata", "ultralytics",
+                    # torchvision >= 0.2x names its ops libraries *_stable.so/.pyd, which the bundled hook
+                    # (it only knows torchvision._C) misses; without them torchvision::nms does not exist.
+                    "--collect-binaries", "torchvision", *torchvision_binaries(),
                     "--add-data", f"{tools}:platform-tools", "--add-data", f"{licenses}:third-party-licenses",
                     "--distpath", str(dist), "--workpath", str(work / "pyinstaller"),
                     "--specpath", str(work), str(ROOT / "stages/01-camera-stream/src/main.py")], cwd=ROOT, check=True)

@@ -2,15 +2,15 @@
 
 외부 카메라 두 대로 DJI Mavic Mini 두 대를 추적하고, 스테레오 보정·삼각측량으로
 3D 좌표를 계산하여 충돌 위험을 경고하는 시스템을 단계별로 개발하는 Python monorepo입니다.
-**현재 구현 범위는 1단계: 두 카메라 영상 수신 및 표시뿐입니다.**
-이 버전으로 드론 간 거리나 충돌 위험을 판단할 수 없습니다.
+**현재 구현 범위는 1단계(두 카메라 수신·표시)와 2단계(YOLO11 드론 탐지·ByteTrack 추적·바운딩 서클, 2D 픽셀 좌표)입니다.**
+이 버전으로 드론의 3차원 위치, 드론 간 거리, 충돌 위험을 판단할 수 없습니다.
 
 ## 개발 단계
 
 | 단계 | 내용 | 구현 상태 |
 | --- | --- | --- |
 | 01 | 두 카메라 실시간 수신·표시 | 코드 구현, 검증 범위는 아래 참고 |
-| 02 | YOLO 드론 인식·추적 | 계획 |
+| 02 | YOLO 드론 인식·추적 (2D) | 코드 구현, 합성 영상까지 검증 — [설명서](docs/ai-detection.md). 실제 비행 검증 전 |
 | 03 | 카메라 보정·삼각측량·3D 추적 | 계획 |
 | 04 | 거리 계산·충돌 위험 경고 | 계획 |
 | 05 | 관제 대시보드·실험 데이터 분석 | 계획 |
@@ -28,6 +28,7 @@ stages/01-camera-stream/
   config.example.json
   requirements.txt
   README.md
+docs/ai-detection.md   YOLO11 + ByteTrack 사용법·구조·데이터 구조·라이선스
 docs/roadmap.md
 docs/releases/           버전별 릴리즈 노트와 단계별 분류
 docs/mobile/README.md   모바일 설치 및 Wi-Fi·USB 연결
@@ -45,7 +46,7 @@ Android는 개발용 서명 APK, iPhone은 무료 Apple 계정으로 직접 설�
 ## 빠른 시작
 
 **Windows 일반 사용자는 Python 설치 없이 EXE를 실행할 수 있습니다.**
-[v0.2.1의 단일 EXE](https://github.com/qlbdwiq/Legend_subao/releases/download/v0.2.1/DroneCollisionDetection-v0.2.1-windows-x64.exe)를
+[최신 릴리즈](https://github.com/qlbdwiq/Legend_subao/releases/latest)의 `…-windows-x64.exe`를
 내려받아 더블클릭하고 설정에서 카메라를 연결하세요. [EXE 사용 설명](docs/windows-exe.md).
 Python·OpenCV·Qt와 Android USB용 adb를 포함합니다. 기기 USB 드라이버·권한 승인은 필요합니다.
 
@@ -55,9 +56,10 @@ Developer ID 서명·공증이 없어 첫 실행에 보안 경고가 나올 수 
 
 아래 Python 설치는 **소스 개발**용입니다.
 
-Python **3.11 또는 3.12**를 권장합니다. Windows 10/11 x86-64, macOS Apple Silicon 및
-Intel을 대상으로 같은 소스를 사용합니다. CPU만 필요하며 CUDA는 사용하지 않습니다.
-Python 3.13 이상은 이 릴리즈의 고정 의존성·CI 지원 범위가 아닙니다.
+Python **3.11 또는 3.12**를 권장합니다(Intel Mac은 3.11). Windows 10/11 x86-64, macOS Apple Silicon 및
+Intel을 대상으로 같은 소스를 사용합니다. 2단계 AI(PyTorch)는 GPU 없이 CPU로 동작하며, CUDA·Apple GPU는 선택 사항입니다.
+Python 3.13 이상은 이 릴리즈의 고정 의존성·CI 지원 범위가 아닙니다. AI 모델 파일(`best.pt`)은 저장소·릴리스에 포함되지 않으며
+프로그램의 **모델 불러오기**로 직접 선택합니다. **Ultralytics는 AGPL-3.0**이므로 [라이선스 안내](docs/ai-detection.md#모델과-라이선스)를 확인하세요.
 
 저장소 루트에서:
 
@@ -65,6 +67,7 @@ Python 3.13 이상은 이 릴리즈의 고정 의존성·CI 지원 범위가 아
 # Windows PowerShell: 가상환경 활성화나 실행 정책 변경 불필요
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r stages/01-camera-stream/requirements.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps -r stages/01-camera-stream/requirements-ultralytics.txt
 .\.venv\Scripts\python.exe stages/01-camera-stream/src/main.py
 ```
 
@@ -72,6 +75,7 @@ py -3.11 -m venv .venv
 # macOS
 python3.11 -m venv .venv
 .venv/bin/python -m pip install -r stages/01-camera-stream/requirements.txt
+.venv/bin/python -m pip install --no-deps -r stages/01-camera-stream/requirements-ultralytics.txt
 .venv/bin/python stages/01-camera-stream/src/main.py
 ```
 

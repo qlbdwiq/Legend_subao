@@ -2,6 +2,12 @@ import os
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Tests must never touch the user's global Ultralytics settings or the network.
+import tempfile
+os.environ.setdefault("YOLO_CONFIG_DIR", tempfile.mkdtemp(prefix="yolo-test-config-"))
+os.environ.setdefault("YOLO_OFFLINE", "1")
+os.environ.setdefault("YOLO_AUTOINSTALL", "False")
+os.environ.setdefault("YOLO_VERBOSE", "False")
 
 import cv2
 import numpy as np
@@ -40,3 +46,20 @@ def wait_for(predicate, timeout=12, app=None):
             return value
         time.sleep(0.02)
     raise AssertionError("Timed out waiting for expected camera behavior")
+
+
+@pytest.fixture(scope="session")
+def real_model_path():
+    value = os.environ.get("DRONE_YOLO_MODEL", "")
+    if not value or not Path(value).is_file():
+        pytest.skip("real_model: set DRONE_YOLO_MODEL to the trained .pt file")
+    pytest.importorskip("ultralytics")
+    return value
+
+
+@pytest.fixture(scope="session")
+def samples_dir():
+    value = os.environ.get("DRONE_YOLO_SAMPLES", "")
+    if not value or not Path(value).is_dir():
+        pytest.skip("real_model: set DRONE_YOLO_SAMPLES to a folder of labelled drone images")
+    return Path(value)
