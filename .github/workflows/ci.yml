@@ -27,7 +27,7 @@ jobs:
         include:
           - os: macos-15-intel
             python: '3.11'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'windows-latest' && vars.WINDOWS_RUNNER) && fromJSON(vars.WINDOWS_RUNNER) || matrix.os }}
     timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
