@@ -6,7 +6,9 @@ permissions:
 jobs:
   standalone:
     name: Windows EXE build and frozen runtime checks
-    runs-on: windows-latest
+    # Repository variable WINDOWS_RUNNER (JSON labels, e.g. ["self-hosted","Windows","X64"]) selects a
+    # self-hosted runner; without it the GitHub-hosted runner is used.
+    runs-on: ${{ vars.WINDOWS_RUNNER && fromJSON(vars.WINDOWS_RUNNER) || 'windows-latest' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
