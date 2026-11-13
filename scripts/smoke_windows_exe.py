@@ -45,7 +45,7 @@ def main(executable: Path, evidence: Path):
             report = evidence.resolve() / (name + ".json")
             command = [str(exe), "--config", str(config), "--self-test-report", str(report)]
             try:
-                result = subprocess.run(command, cwd=folder, env=env, timeout=90)
+                result = subprocess.run(command, cwd=folder, env=env, timeout=420)
             except subprocess.TimeoutExpired:
                 subprocess.run(["taskkill", "/IM", exe.name, "/T", "/F"], capture_output=True)
                 raise
@@ -54,6 +54,8 @@ def main(executable: Path, evidence: Path):
             print(name, json.dumps(data))
             assert result.returncode == 0 and data["ok"] and data["frozen"] and data["bundled_adb"]
             assert data["workers_stopped"] and data["active_children"] == 0
+            assert data["ai_runtime"]["ok"] and len(set(data["ai_runtime"]["bytetrack_ids"])) == 2, data["ai_runtime"]
+            assert data["model_check"]["ok"], data["model_check"]
             assert len(data["cameras"]) == 2 and all(c["frames"] >= 5 for c in data["cameras"])
 
         run("file", video.name, "dual-file")

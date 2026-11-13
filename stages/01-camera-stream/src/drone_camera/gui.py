@@ -5,13 +5,19 @@ from dataclasses import replace
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QMainWindow, QMessageBox, QPushButton, QSizePolicy, QSpinBox, QVBoxLayout,
+    QWidget,
 )
 
+from .ai_pipeline import AiPipeline, InferenceParams
+from .ai_settings import (
+    DEVICES, IMAGE_SIZES, AiSettings, AiSettingsError, load_ai_settings,
+    save_ai_settings, settings_path_for,
+)
 from .capabilities import (
     STANDARD_FPS, STANDARD_RESOLUTIONS, CapabilityError, StreamMode,
     best_fps_mode, best_resolution_mode, fetch_capabilities, fps_options,
@@ -19,13 +25,21 @@ from .capabilities import (
 )
 from .capture import CameraSource, State
 from .config import CameraConfig, ConfigError, resolved_config, save_config
+from .geometry import MAX_SAFETY_FACTOR, MIN_SAFETY_FACTOR
 from .usb import UsbError, UsbTunnel, companion_url
+
+# An AI result older than this is hidden rather than shown as the current position.
+OVERLAY_MAX_AGE_SECONDS = 1.0
+TRACK_COLORS = ("#ff5252", "#40c4ff", "#ffd740", "#69f0ae", "#e040fb", "#ff9100")
+DEVICE_LABELS = {"auto": "자동 / Auto", "cpu": "CPU", "cuda": "NVIDIA CUDA", "mps": "Apple GPU (MPS)"}
 
 
 class VideoView(QLabel):
     def __init__(self):
         super().__init__("연결 대기 / Waiting for connection")
         self._image = None
+        self._detections = None
+        self._options = AiSettings()
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(240, 180)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
@@ -37,16 +51,76 @@ class VideoView(QLabel):
                              QImage.Format.Format_BGR888).copy()
         self._redraw()
 
+    def set_detections(self, detections, options=None):
+        """Overlay one analysed frame's drones. None removes the overlay."""
+        if detections is self._detections and (options is None or options is self._options):
+            return
+        self._detections = detections
+        if options is not None:
+            self._options = options
+        self._redraw()
+
     def clear_frame(self, text):
         self._image = None
+        self._detections = None
         self.setPixmap(QPixmap())
         self.setText(text)
 
     def _redraw(self):
         if self._image is not None:
-            self.setPixmap(QPixmap.fromImage(self._image).scaled(
+            pixmap = QPixmap.fromImage(self._image).scaled(
                 self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation))
+                Qt.TransformationMode.SmoothTransformation)
+            if self._detections is not None:
+                self._paint_overlay(pixmap)
+            self.setPixmap(pixmap)
+
+    def _paint_overlay(self, pixmap):
+        detections = self._detections
+        # Never draw coordinates of another resolution onto this image.
+        if detections.image_size != (self._image.width(), self._image.height()) or not (
+                self._options.show_circle or self._options.show_box):
+            return
+        scale = pixmap.width() / self._image.width()
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = QFont(painter.font())
+        font.setPixelSize(13)
+        font.setBold(True)
+        painter.setFont(font)
+        for observation in detections.observations:
+            color = QColor(TRACK_COLORS[observation.track_id % len(TRACK_COLORS)]
+                           if observation.track_id is not None else "#b0bec5")
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            cx, cy = observation.center[0] * scale, observation.center[1] * scale
+            if self._options.show_box:
+                x1, y1, x2, y2 = (value * scale for value in observation.bbox)
+                painter.drawRect(round(x1), round(y1), round(x2 - x1), round(y2 - y1))
+            parts = []
+            if self._options.show_circle:
+                radius = observation.safe_radius * scale
+                painter.drawEllipse(round(cx - radius), round(cy - radius), round(2 * radius), round(2 * radius))
+                painter.setBrush(color)
+                painter.drawEllipse(round(cx - 3), round(cy - 3), 6, 6)
+                parts.append(f"r {observation.safe_radius:.0f}px")
+            if self._options.show_id:
+                parts.insert(0, "ID —" if observation.track_id is None else f"ID {observation.track_id}")
+            if self._options.show_confidence:
+                parts.append(f"{observation.confidence * 100:.0f}%")
+            if parts:
+                text = "  ".join(parts)
+                top = cy - (observation.safe_radius * scale if self._options.show_circle else 0) - 22
+                metrics = painter.fontMetrics()
+                width = metrics.horizontalAdvance(text) + 8
+                left = min(max(0, cx - width / 2), max(0, pixmap.width() - width))
+                top = min(max(0, top), max(0, pixmap.height() - 20))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(5, 8, 13, 190))
+                painter.drawRect(round(left), round(top), width, 20)
+                painter.setPen(color)
+                painter.drawText(round(left) + 4, round(top) + 15, text)
+        painter.end()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -327,22 +401,39 @@ STATE_LABELS = {
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, configs: list[CameraConfig], config_path: Path):
+    def __init__(self, configs: list[CameraConfig], config_path: Path,
+                 ai_settings_path: Path | None = None, pipeline: AiPipeline | None = None):
         super().__init__()
         self.configs = configs
         self.config_path = config_path
         self.retired_tunnels = []
         self.setup_sources()
         self.sequences = [0, 0]
-        self.setWindowTitle("Drone Collision Detection System — Phase 01")
-        self.resize(1280, 760)
-        self.setMinimumSize(800, 560)
+        # AI is created lazily: with AI unused, no thread starts and torch is never imported.
+        self.pipeline = pipeline
+        self.ai_settings_path = ai_settings_path or settings_path_for(config_path)
+        self.ai_notice = ""
+        try:
+            self.ai_settings = load_ai_settings(self.ai_settings_path)
+        except AiSettingsError as error:
+            self.ai_settings = AiSettings()
+            self.ai_notice = f"AI 설정을 읽지 못해 기본값을 사용합니다: {error}"
+        self._connected_before = [False, False]
+        self._shown_detections = [None, None]
+        self._last_model_text = None
+        self._ai_save_timer = QTimer(self)
+        self._ai_save_timer.setSingleShot(True)
+        self._ai_save_timer.setInterval(500)
+        self._ai_save_timer.timeout.connect(self._save_ai_settings)
+        self.setWindowTitle("Drone Collision Detection System — Phase 02")
+        self.resize(1280, 880)
+        self.setMinimumSize(800, 640)
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         layout.setContentsMargins(20, 20, 20, 20)
         header = QHBoxLayout()
-        title = QLabel("Drone Collision Detection System\nPHASE 01  ·  DUAL CAMERA STREAMING")
+        title = QLabel("Drone Collision Detection System\nPHASE 02  ·  YOLO11 DETECTION + BYTETRACK (2D)")
         title.setStyleSheet("font-size: 20px; font-weight: 600;")
         self.summary = QLabel()
         self.summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -352,6 +443,7 @@ class MainWindow(QMainWindow):
         header.addWidget(self.summary)
         header.addWidget(settings)
         layout.addLayout(header)
+        layout.addWidget(self._build_ai_panel())
         row = QHBoxLayout()
         self.views, self.details, self.buttons, self.titles = [], [], [], []
         for i in range(2):
@@ -362,7 +454,7 @@ class MainWindow(QMainWindow):
             view = VideoView()
             details = QLabel()
             details.setWordWrap(True)
-            details.setMinimumHeight(132)
+            details.setMinimumHeight(150)
             details.setTextFormat(Qt.TextFormat.PlainText)
             button = QPushButton()
             button.clicked.connect(lambda checked=False, index=i: self.toggle(index))
@@ -384,7 +476,8 @@ class MainWindow(QMainWindow):
             button.clicked.connect(action)
             bottom.addWidget(button)
         layout.addLayout(bottom)
-        footer = QLabel("CPU ONLY  •  수신 시각 기준 / Reception timestamps  •  객체 인식 및 충돌 판단 기능 미포함")
+        footer = QLabel("수신 시각 기준 / Reception timestamps  •  카메라별 독립 추적 ID (카메라 간 대응 아님)  •  "
+                        "2D 픽셀 좌표만 제공: 3D 위치·거리·충돌 판단 기능 미포함")
         footer.setStyleSheet("color: #93a4bd;")
         layout.addWidget(footer)
         self.setStyleSheet("""
@@ -402,10 +495,178 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.refresh)
         self.timer.start(33)
         self.refresh()
+        if self.ai_settings.enabled and self.ai_settings.model_path:
+            self._start_ai()
+
+    # ------------------------------------------------------------------ AI
+    def _build_ai_panel(self):
+        settings = self.ai_settings
+        group = QGroupBox("AI 탐지 / YOLO11 + ByteTrack")
+        column = QVBoxLayout(group)
+        top = QHBoxLayout()
+        load = QPushButton("모델 불러오기 / Load model…")
+        load.clicked.connect(self.choose_model)
+        reload_button = QPushButton("다시 불러오기 / Reload")
+        reload_button.clicked.connect(self.reload_model)
+        self.ai_enabled = QCheckBox("AI 탐지 ON / Detection")
+        self.ai_enabled.setChecked(bool(settings.enabled and settings.model_path))
+        self.model_label = QLabel()
+        self.model_label.setWordWrap(True)
+        self.model_label.setTextFormat(Qt.TextFormat.PlainText)
+        for widget in (load, reload_button, self.ai_enabled):
+            top.addWidget(widget)
+        top.addWidget(self.model_label, 1)
+        column.addLayout(top)
+        options = QHBoxLayout()
+        self.ai_confidence = QDoubleSpinBox()
+        self.ai_confidence.setRange(0.05, 0.95)
+        self.ai_confidence.setSingleStep(0.05)
+        self.ai_confidence.setDecimals(2)
+        self.ai_confidence.setValue(settings.confidence)
+        self.ai_iou = QDoubleSpinBox()
+        self.ai_iou.setRange(0.1, 0.95)
+        self.ai_iou.setSingleStep(0.05)
+        self.ai_iou.setDecimals(2)
+        self.ai_iou.setValue(settings.iou)
+        self.ai_imgsz = QComboBox()
+        for size in IMAGE_SIZES:
+            self.ai_imgsz.addItem(f"{size} px", size)
+        self.ai_imgsz.setCurrentIndex(IMAGE_SIZES.index(settings.imgsz))
+        self.ai_device = QComboBox()
+        for device in DEVICES:
+            self.ai_device.addItem(DEVICE_LABELS[device], device)
+        self.ai_device.setCurrentIndex(DEVICES.index(settings.device))
+        self.ai_safety = QDoubleSpinBox()
+        self.ai_safety.setRange(MIN_SAFETY_FACTOR, MAX_SAFETY_FACTOR)
+        self.ai_safety.setSingleStep(0.05)
+        self.ai_safety.setDecimals(2)
+        self.ai_safety.setValue(settings.safety_factor)
+        self.ai_safety.setToolTip("바운딩 서클 반지름 = 박스 대각선의 절반 × 계수. 실험용 설정이며 비행 안전을 보장하지 않습니다.")
+        self.ai_show = {}
+        for label, widget in (("신뢰도 / Confidence", self.ai_confidence), ("NMS IoU", self.ai_iou),
+                              ("추론 해상도 / Size", self.ai_imgsz), ("장치 / Device", self.ai_device),
+                              ("서클 여유 계수 / Safety", self.ai_safety)):
+            options.addWidget(QLabel(label))
+            options.addWidget(widget)
+        for key, label in (("show_box", "박스"), ("show_circle", "서클"),
+                           ("show_id", "ID"), ("show_confidence", "신뢰도 표시")):
+            box = QCheckBox(label)
+            box.setChecked(getattr(settings, key))
+            self.ai_show[key] = box
+            options.addWidget(box)
+        options.addStretch(1)
+        column.addLayout(options)
+        self.ai_enabled.toggled.connect(self._ai_enabled_toggled)
+        for widget in (self.ai_confidence, self.ai_iou, self.ai_safety):
+            widget.valueChanged.connect(self._ai_options_changed)
+        self.ai_imgsz.currentIndexChanged.connect(self._ai_options_changed)
+        self.ai_device.currentIndexChanged.connect(self._ai_device_changed)
+        for box in self.ai_show.values():
+            box.toggled.connect(self._ai_options_changed)
+        return group
+
+    def _ensure_pipeline(self) -> AiPipeline:
+        if self.pipeline is None:
+            self.pipeline = AiPipeline(config_dir=self.config_path.parent / "ultralytics")
+        return self.pipeline
+
+    def _inference_params(self) -> InferenceParams:
+        s = self.ai_settings
+        return InferenceParams(s.confidence, s.iou, s.imgsz, s.safety_factor)
+
+    def _read_ai_widgets(self):
+        """Build validated settings from the widgets; keep the old ones if invalid."""
+        try:
+            self.ai_settings = AiSettings(
+                self.ai_settings.model_path, self.ai_enabled.isChecked(), self.ai_confidence.value(),
+                self.ai_iou.value(), self.ai_imgsz.currentData(), self.ai_device.currentData(),
+                self.ai_safety.value(), **{key: box.isChecked() for key, box in self.ai_show.items()})
+        except AiSettingsError as error:
+            self.ai_notice = str(error)
+        if self.pipeline is not None:
+            self.pipeline.configure(self._inference_params())
+        self._ai_save_timer.start()
+
+    def _ai_options_changed(self, *_):
+        self._read_ai_widgets()
+
+    def _ai_device_changed(self, *_):
+        self._read_ai_widgets()
+        if self.ai_settings.model_path and self.pipeline is not None:
+            self._load_model()          # A different device needs the model moved/re-resolved.
+
+    def _ai_enabled_toggled(self, checked):
+        if checked and not self.ai_settings.model_path:
+            self.ai_enabled.blockSignals(True)
+            self.ai_enabled.setChecked(False)
+            self.ai_enabled.blockSignals(False)
+            self.ai_notice = "AI 탐지를 켜려면 먼저 모델(.pt) 파일을 불러오세요."
+            return
+        self._read_ai_widgets()
+        if checked:
+            self._start_ai()
+        elif self.pipeline is not None:
+            self.pipeline.set_enabled(False)
+
+    def _start_ai(self):
+        pipeline = self._ensure_pipeline()
+        pipeline.configure(self._inference_params())
+        if pipeline.model_status().state in ("none", "error"):
+            self._load_model()
+        pipeline.set_enabled(True)
+
+    def _load_model(self):
+        pipeline = self._ensure_pipeline()
+        pipeline.configure(self._inference_params())
+        self.ai_notice = ""
+        pipeline.load_model(self.ai_settings.model_path, self.ai_settings.device)
+        self._last_model_text = None
+
+    def choose_model(self):
+        current = Path(self.ai_settings.model_path).expanduser().parent if self.ai_settings.model_path else Path.home()
+        path, _ = QFileDialog.getOpenFileName(
+            self, "YOLO 모델 선택 / Select YOLO model",
+            str(current if current.is_dir() else Path.home()), "PyTorch 모델 (*.pt)")
+        if not path:
+            return
+        self.ai_settings = replace(self.ai_settings, model_path=path)
+        self._ai_save_timer.start()
+        self._load_model()
+
+    def reload_model(self):
+        if not self.ai_settings.model_path:
+            self.choose_model()
+        else:
+            self._load_model()
+
+    def _save_ai_settings(self):
+        try:
+            save_ai_settings(self.ai_settings_path, self.ai_settings)
+        except OSError:
+            self.ai_notice = "AI 설정을 저장할 수 없습니다. 폴더 쓰기 권한을 확인하세요."
+
+    def _model_text(self):
+        status = self.pipeline.model_status() if self.pipeline is not None else None
+        name = Path(self.ai_settings.model_path).name if self.ai_settings.model_path else ""
+        if status is None or status.state == "none":
+            if self.ai_notice:
+                return self.ai_notice
+            return (f"모델 대기: {name} (AI 탐지를 켜거나 다시 불러오세요)" if name
+                    else "모델 미선택 — '모델 불러오기'로 학습된 .pt 파일을 선택하세요. (신뢰할 수 있는 파일만 사용)")
+        if status.state == "loading":
+            return f"모델 불러오는 중… {name}"
+        if status.state == "error":
+            return f"⚠ 모델 오류: {status.message}"
+        info = status.info
+        text = (f"모델: {name} · 장치 {info.device} · 클래스 {info.names} · "
+                f"torch {info.torch_version} / ultralytics {info.ultralytics_version}")
+        return text + (f"\n{status.message}" if status.message else "")
 
     def connect_camera(self, index):
         if not self.sources[index].active:
             self.sequences[index] = 0
+            if self.pipeline is not None:
+                self.pipeline.reset_camera(index)   # New connection: new tracks, new IDs.
             self.sources[index].connect()
 
     def setup_sources(self):
@@ -509,19 +770,32 @@ class MainWindow(QMainWindow):
 
     def refresh(self):
         connected = 0
+        pipeline = self.pipeline
+        ai_on = pipeline is not None and pipeline.enabled
         for i, source in enumerate(self.sources):
             source.poll()
             status = source.status()
             label = STATE_LABELS[status.state]
             self.titles[i].setText(f"{i + 1:02d}  {self.configs[i].name}")
+            detection = None
             if status.state == State.CONNECTED:
                 connected += 1
                 frame = source.latest_frame(self.sequences[i])
                 if frame is not None:
                     self.views[i].set_frame(frame)
                     self.sequences[i] = frame.sequence
+                    if ai_on:
+                        pipeline.submit(i, frame)   # Newest frame only; never blocks the GUI.
+                if ai_on:
+                    detection = pipeline.latest(i)
+                    if detection is not None and time.monotonic() - detection.completed_monotonic > OVERLAY_MAX_AGE_SECONDS:
+                        detection = None            # Stale: do not present as the current position.
+                self.views[i].set_detections(detection, self.ai_settings)
             else:
                 self.views[i].clear_frame(label)
+                if self._connected_before[i] and pipeline is not None:
+                    pipeline.reset_camera(i)
+            self._connected_before[i] = status.state == State.CONNECTED
             age = f"{max(0, time.monotonic() - status.last_received):.1f} s" if status.last_received else "—"
             resolution = f"{status.width} × {status.height}" if status.width else "—"
             requested = (f"{status.requested_width} × {status.requested_height} · "
@@ -532,14 +806,26 @@ class MainWindow(QMainWindow):
             if status.state == State.CONNECTED and status.requested_width and status.width \
                     and (status.width, status.height) != (status.requested_width, status.requested_height):
                 mismatch = " · 설정과 실제 해상도 다름 / differs from requested"
+            if ai_on:
+                stats = pipeline.stats(i)
+                ai_line = (f"AI: {len(detection.observations) if detection else 0}대 · AI {stats.fps:.1f} FPS · "
+                           f"추론 {stats.inference_ms:.0f} ms · 수신→결과 {stats.latency_ms:.0f} ms"
+                           f"{' · ' + stats.error if stats.error else ''}")
+            else:
+                ai_line = "AI: OFF"
             self.details[i].setText(
                 f"{self.configs[i].name}  ·  {self.configs[i].input_type.upper()}\n"
                 f"설정 / Requested: {requested}\n"
                 f"캡처 / Capture: {capture_fps} FPS  ·  수신·출력 / Receive: {status.fps:.1f} FPS\n"
                 f"실제 / Actual: {resolution}{mismatch}  ·  마지막 수신 / Last frame: {age}\n"
+                f"{ai_line}\n"
                 f"{label}\n{self.usb_errors[i] or (self.tunnels[i].error if self.tunnels[i] and self.tunnels[i].error else status.message)}")
             self.buttons[i].setText(f"Camera {i + 1:02d} " + ("해제 / Disconnect" if source.active else "연결 / Connect"))
             self.buttons[i].setEnabled(status.state != State.STOPPING)
+        model_text = self._model_text()
+        if model_text != self._last_model_text:
+            self.model_label.setText(model_text)
+            self._last_model_text = model_text
         self.summary.setText(f"{connected} / 2 CONNECTED\n" + (
             "전체 수신 중" if connected == 2 else "일부 수신 중" if connected else "수신 대기"))
 
@@ -555,6 +841,11 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def shutdown(self):
+        if self._ai_save_timer.isActive():
+            self._ai_save_timer.stop()
+            self._save_ai_settings()
+        if self.pipeline is not None:
+            self.pipeline.stop(timeout=3)
         for source in self.sources:
             source.disconnect()
         all_tunnels = self.tunnels + self.retired_tunnels

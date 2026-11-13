@@ -6,7 +6,7 @@ from .config import ConfigError, defaults, load_config
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Phase 01 dual camera streaming")
+    parser = argparse.ArgumentParser(description="Phase 02 dual camera streaming with YOLO11 detection and ByteTrack tracking")
     parser.add_argument("--config", type=Path, help="Configuration JSON; relative video paths use its directory")
     parser.add_argument("--validate-config", type=Path, help="Validate JSON and exit without loading Qt")
     parser.add_argument("--self-test-report", type=Path, help=argparse.SUPPRESS)
