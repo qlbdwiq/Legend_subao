@@ -23,8 +23,8 @@ CALIBRATION_TYPES = ("field", "auto", "synthetic")
 CAMERA_LAYOUTS = ("horizontal", "vertical")
 
 # Physical diagonal/unfolded span (meters) for camera-based distance & scale estimation
-# DJI Mavic 3: 347.5 x 283 x 107.7 mm unfolded, 380.1 mm diagonal wheelbase
-# DJI Lito X1: 183.3 x 251.3 x 79.4 mm unfolded (18.3 cm length x 25.1 cm width; 144.4 x 93.9 x 62.4 mm folded)
+# drone model A: 380.1 mm diagonal wheelbase (0.380 m)
+# drone model B: 183.3 x 251.3 x 79.4 mm unfolded (18.3 cm length x 25.1 cm width -> 0.251 m)
 MAVIC_3_SPAN_M = 0.380
 LITO_X1_SPAN_M = 0.251
 
