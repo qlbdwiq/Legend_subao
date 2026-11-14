@@ -77,9 +77,10 @@ class DroneSpace3DWidget(QWidget):
         self._yaw_deg = -28.0
         self._pitch_deg = 22.0
         self._drag_pos = None
+        self._last_scene_sig = None
 
     def set_view_mode(self, mode: str) -> None:
-        if mode in ("3d", "top", "front"):
+        if mode in ("3d", "top", "front") and mode != self._view_mode:
             self._view_mode = mode
             self.update()
 
@@ -89,10 +90,19 @@ class DroneSpace3DWidget(QWidget):
         stereo: StereoFrameResult | None,
         collision: CollisionAnalysisResult | None,
     ) -> None:
+        sig = (
+            id(calibration),
+            stereo.status if stereo is not None else None,
+            stereo.drones if stereo is not None else (),
+            collision.risk_level if collision is not None else None,
+            collision.pair_metrics if collision is not None else None,
+        )
         self._calibration = calibration
         self._stereo = stereo
         self._collision = collision
-        self.update()
+        if sig != self._last_scene_sig:
+            self._last_scene_sig = sig
+            self.update()
 
     def _project_3d_to_2d(self, pt_xyz: tuple[float, float, float], width: float, height: float) -> tuple[float, float]:
         """Map 3D Camera-1 coordinates (X right, Y down, Z forward in meters) to widget pixels."""

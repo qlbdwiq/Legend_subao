@@ -46,7 +46,7 @@ from .stereo_3d import StereoFrameResult, StereoTracker3D
 from .usb import UsbError, UsbTunnel, companion_url
 
 # An AI result older than this is hidden rather than shown as the current position.
-OVERLAY_MAX_AGE_SECONDS = 1.0
+OVERLAY_MAX_AGE_SECONDS = 2.0
 TRACK_COLORS = ("#ff5252", "#40c4ff", "#ffd740", "#69f0ae", "#e040fb", "#ff9100")
 DEVICE_LABELS = {"auto": "자동 / Auto", "cpu": "CPU", "cuda": "NVIDIA CUDA", "mps": "Apple GPU (MPS)"}
 
@@ -1261,6 +1261,11 @@ class MainWindow(QMainWindow):
         # Phase 03-05 update
         self._update_stereo_and_collision_dashboard(current_detections[0], current_detections[1], new_ai_frame)
 
+    @staticmethod
+    def _set_text_if_changed(label: QLabel, text: str) -> None:
+        if label.text() != text:
+            label.setText(text)
+
     def _update_stereo_and_collision_dashboard(self, det_01, det_02, new_ai_frame: bool) -> None:
         stereo = self.stereo_tracker.process(det_01, det_02, self.calibration)
         collision = self.collision_analyzer.analyze(stereo)
@@ -1275,15 +1280,18 @@ class MainWindow(QMainWindow):
             f1 = self._latest_frames[0].image if self._latest_frames[0] is not None else None
             f2 = self._latest_frames[1].image if self._latest_frames[1] is not None else None
             self.recorder.record_tick(det_01, det_02, stereo, collision, frame_01=f1, frame_02=f2)
-            self.record_status_label.setText(
+            self._set_text_if_changed(
+                self.record_status_label,
                 f"● 기록 중: {self.recorder.jsonl_path.name if self.recorder.jsonl_path else ''} "
-                f"({len(self.recorder.ticks)}틱)"
+                f"({len(self.recorder.ticks)}틱)",
             )
 
         # Risk Banner
         style_key = collision.risk_level if (collision.visual_alert_active or collision.risk_level in (RISK_UNKNOWN, RISK_SAFE)) else RISK_SAFE
-        self.risk_banner.setStyleSheet(RISK_BANNER_STYLES.get(style_key, RISK_BANNER_STYLES[RISK_UNKNOWN]))
-        self.risk_banner.setText(f"[{collision.risk_label}]\n{collision.reason}")
+        if getattr(self, "_last_banner_style_key", None) != style_key:
+            self._last_banner_style_key = style_key
+            self.risk_banner.setStyleSheet(RISK_BANNER_STYLES.get(style_key, RISK_BANNER_STYLES[RISK_UNKNOWN]))
+        self._set_text_if_changed(self.risk_banner, f"[{collision.risk_label}]\n{collision.reason}")
 
         # Status overview
         if self.calibration is None:
@@ -1311,12 +1319,13 @@ class MainWindow(QMainWindow):
             dist_txt = "— (계산 불가)"
             cpa_txt = "— (계산 불가)"
 
-        self.status_overview_label.setText(
+        self._set_text_if_changed(
+            self.status_overview_label,
             f"보정 상태: {calib_txt}\n"
             f"동기화: {sync_txt}\n"
             f"3D 상태: {stereo.status_message}\n"
             f"드론 간 3D 거리: {dist_txt}\n"
-            f"접근 속도 · CPA: {cpa_txt}"
+            f"접근 속도 · CPA: {cpa_txt}",
         )
 
         # 3D widget & telemetry text
@@ -1332,28 +1341,31 @@ class MainWindow(QMainWindow):
                     f"  속도(Vx,Vy,Vz): ({vx:+.2f}, {vy:+.2f}, {vz:+.2f}) m/s · {k.direction_label}\n"
                     f"  신뢰도: {k.confidence_score * 100:.0f}% · 재투영 오차: {k.reprojection_error_px:.2f} px"
                 )
-            self.drone_telemetry_label.setText("\n".join(lines))
+            self._set_text_if_changed(self.drone_telemetry_label, "\n".join(lines))
         else:
-            self.drone_telemetry_label.setText(
-                f"확정된 3D 좌표 없음 — {stereo.status_message}"
+            self._set_text_if_changed(
+                self.drone_telemetry_label,
+                f"확정된 3D 좌표 없음 — {stereo.status_message}",
             )
 
         # Calibration detail label in Tab 2
         if self.calibration is None:
-            self.calib_detail_label.setText(
+            self._set_text_if_changed(
+                self.calib_detail_label,
                 self.calibration_notice
                 or "현재 상태: 미보정 (Uncalibrated)\n"
-                   "보정 데이터가 없으면 임의의 3D 좌표를 생성하지 않으며 충돌 위험은 '판단 불가'로 유지됩니다."
+                   "보정 데이터가 없으면 임의의 3D 좌표를 생성하지 않으며 충돌 위험은 '판단 불가'로 유지됩니다.",
             )
         else:
             c = self.calibration
             tag = "합성 보정 (소프트웨어 검증용)" if c.calibration_type == "synthetic" else "현장 실측 보정"
-            self.calib_detail_label.setText(
+            self._set_text_if_changed(
+                self.calib_detail_label,
                 f"보정 유형: {tag}\n"
                 f"기준선(Baseline): {c.baseline_m:.3f} m · 스테레오 RMS: {c.rms_error:.3f} px\n"
                 f"Cam1 f=({c.camera_01.fx:.1f}, {c.camera_01.fy:.1f}) px · "
                 f"Cam2 f=({c.camera_02.fx:.1f}, {c.camera_02.fy:.1f}) px\n"
-                f"시간 오프셋: {c.time_offset_s * 1000:+.1f} ms · 허용 동기화 오차: {c.max_sync_delta_s * 1000:.0f} ms"
+                f"시간 오프셋: {c.time_offset_s * 1000:+.1f} ms · 허용 동기화 오차: {c.max_sync_delta_s * 1000:.0f} ms",
             )
 
         # Risk Events list in Tab 3
@@ -1364,9 +1376,9 @@ class MainWindow(QMainWindow):
             for ev in reversed(recent):
                 d_str = f"{ev.distance_m:.2f}m" if ev.distance_m is not None else "—"
                 ev_lines.append(f"[#{ev.event_id} {ev.risk_level.upper()}] 거리:{d_str} · {ev.reason}")
-            self.risk_events_label.setText("\n".join(ev_lines))
+            self._set_text_if_changed(self.risk_events_label, "\n".join(ev_lines))
         else:
-            self.risk_events_label.setText("기록된 위험 이벤트 없음")
+            self._set_text_if_changed(self.risk_events_label, "기록된 위험 이벤트 없음")
 
     def closeEvent(self, event):
         self.timer.stop()
