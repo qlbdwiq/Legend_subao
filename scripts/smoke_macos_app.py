@@ -81,6 +81,7 @@ def main(dmg: Path, evidence: Path):
             assert result.returncode == 0 and data["ok"] and data["frozen"] and data["bundled_adb"]
             assert data["workers_stopped"] and data["active_children"] == 0
             assert data["ai_runtime"]["ok"] and len(set(data["ai_runtime"]["bytetrack_ids"])) == 2, data["ai_runtime"]
+            assert data["stereo_3d_collision"]["ok"], data["stereo_3d_collision"]
             assert data["model_check"]["ok"], data["model_check"]
             assert len(data["cameras"]) == 2 and all(c["frames"] >= 5 for c in data["cameras"])
 

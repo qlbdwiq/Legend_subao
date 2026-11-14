@@ -2,18 +2,18 @@
 
 외부 카메라 두 대로 DJI Mavic Mini 두 대를 추적하고, 스테레오 보정·삼각측량으로
 3D 좌표를 계산하여 충돌 위험을 경고하는 시스템을 단계별로 개발하는 Python monorepo입니다.
-**현재 구현 범위는 1단계(두 카메라 수신·표시)와 2단계(YOLO11 드론 탐지·ByteTrack 추적·바운딩 서클, 2D 픽셀 좌표)입니다.**
-이 버전으로 드론의 3차원 위치, 드론 간 거리, 충돌 위험을 판단할 수 없습니다.
+**현재 `v0.6.0`에서 1단계(두 카메라 수신·표시), 2단계(YOLO11 드론 탐지·ByteTrack 추적·바운딩 서클), 3단계(스테레오 카메라 보정·3D 좌표 계산), 4단계(3D 충돌 위험 분석·경고), 5단계(통합 관제 대시보드·실험 기록·CSV·재생)까지 모든 소프트웨어 기능이 하나의 프로그램으로 통합되었습니다.**
+단위 테스트·합성 데이터·자동화 CI 검증이 완료되었으며, **실제 드론 2대와 카메라 2대를 이용한 현장 실험은 최종 단계로 남아 있습니다(실험용 보조 시스템 / 실제 비행 미검증).**
 
 ## 개발 단계
 
 | 단계 | 내용 | 구현 상태 |
 | --- | --- | --- |
-| 01 | 두 카메라 실시간 수신·표시 | 코드 구현, 검증 범위는 아래 참고 |
-| 02 | YOLO 드론 인식·추적 (2D) | 코드 구현, 합성 영상까지 검증 — [설명서](docs/ai-detection.md). 실제 비행 검증 전 |
-| 03 | 카메라 보정·삼각측량·3D 추적 | 계획 |
-| 04 | 거리 계산·충돌 위험 경고 | 계획 |
-| 05 | 관제 대시보드·실험 데이터 분석 | 계획 |
+| 01 | 두 카메라 실시간 수신·표시 | 코드 구현 완료 (`v0.1.0`–`v0.4.0`), 검증 범위는 아래 참고 |
+| 02 | YOLO 드론 인식·추적 (2D) | 코드 구현 완료 (`v0.5.0`), 합성 영상까지 검증 — [설명서](docs/ai-detection.md). 실제 비행 검증 전 |
+| 03 | 카메라 보정·삼각측량·3D 추적 | 코드 구현 완료 (`v0.6.0`), 합성 데이터·단위 테스트 검증 — [설명서](docs/stereo-3d-and-collision.md). 실제 비행 검증 전 |
+| 04 | 거리 계산·충돌 위험 경고 | 코드 구현 완료 (`v0.6.0`), 합성 궤적·단위 테스트 검증 — [설명서](docs/stereo-3d-and-collision.md). 실제 비행 검증 전 |
+| 05 | 관제 대시보드·실험 데이터 분석 | 코드 구현 완료 (`v0.6.0`), 헤드리스 GUI·기록·재생 테스트 검증 — [설명서](docs/stereo-3d-and-collision.md). 실제 비행 검증 전 |
 
 ## 구조
 
@@ -22,17 +22,18 @@
 apps/android-camera/    Galaxy/Android Camera2 송출 앱, APK 빌드
 apps/ios-camera/        iPhone/iPad AVFoundation 송출 앱, Xcode 프로젝트
 stages/01-camera-stream/
-  src/drone_camera/     Qt와 독립된 설정·영상 소스 모듈, Qt GUI
+  src/drone_camera/     카메라 수신, 2D AI, 3D 삼각측량, 충돌 분석, 기록기, Qt 관제 대시보드
   src/main.py           실행 진입점
-  tests/               설정·수신·오류·재연결·headless GUI 검증
+  tests/                설정·수신·2D AI·3D 보정·삼각측량·충돌 경고·기록·headless GUI 검증
   config.example.json
   requirements.txt
   README.md
-docs/ai-detection.md   YOLO11 + ByteTrack 사용법·구조·데이터 구조·라이선스
+docs/ai-detection.md            YOLO11 + ByteTrack 사용법·구조·데이터 구조·라이선스
+docs/stereo-3d-and-collision.md 3~5단계 3D 보정·삼각측량·충돌 분석·대시보드·현장 실험 절차서
 docs/roadmap.md
-docs/releases/           버전별 릴리즈 노트와 단계별 분류
-docs/mobile/README.md   모바일 설치 및 Wi-Fi·USB 연결
-scripts/                합성 테스트 영상 및 소스 ZIP 생성
+docs/releases/                  버전별 릴리즈 노트와 단계별 분류
+docs/mobile/README.md           모바일 설치 및 Wi-Fi·USB 연결
+scripts/                        합성 테스트 영상 및 소스 ZIP 생성
 ```
 
 카메라 장치는 iPhone, iPad, Android 또는 USB 웹캠을 사용할 수 있습니다.
