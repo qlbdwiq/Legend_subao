@@ -130,9 +130,21 @@ class UsbTunnel:
                     # Fixed bounded per-direction pending buffers, with backpressure.
                     pending = {self.request: bytearray(), upstream: bytearray()}
                     opposite = {self.request: upstream, upstream: self.request}
+                    reading = set(pending)
+                    write_closed = set()
                     tunnel.error = ""
                     while not tunnel._closed:
-                        reads = [s for s in pending if len(pending[opposite[s]]) < 65536]
+                        # A short HTTP response may be followed immediately by
+                        # EOF. Drain it before propagating the half-close;
+                        # returning on recv(b'') would truncate capabilities JSON.
+                        for stream in pending:
+                            if (opposite[stream] not in reading and not pending[stream]
+                                    and stream not in write_closed):
+                                stream.shutdown(socket.SHUT_WR)
+                                write_closed.add(stream)
+                        if not reading and not any(pending.values()):
+                            return
+                        reads = [s for s in reading if len(pending[opposite[s]]) < 65536]
                         writes = [s for s in pending if pending[s]]
                         ready, writable, _ = select.select(reads, writes, [], 0.2)
                         for stream in ready:
@@ -141,8 +153,9 @@ class UsbTunnel:
                             except BlockingIOError:
                                 continue
                             if not data:
-                                return
-                            pending[opposite[stream]].extend(data)
+                                reading.remove(stream)
+                            else:
+                                pending[opposite[stream]].extend(data)
                         for stream in writable:
                             try:
                                 sent = stream.send(pending[stream])

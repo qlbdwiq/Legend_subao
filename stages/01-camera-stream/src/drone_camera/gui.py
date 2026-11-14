@@ -24,9 +24,8 @@ from .calibration import (
     create_synthetic_calibration, load_calibration, save_calibration,
 )
 from .capabilities import (
-    STANDARD_FPS, STANDARD_RESOLUTIONS, CapabilityError, StreamMode,
-    best_fps_mode, best_resolution_mode, fetch_capabilities, fps_options,
-    is_supported, probe_usb_modes,
+    STANDARD_FPS, STANDARD_RESOLUTIONS, CapabilityError,
+    best_fps_mode, best_resolution_mode, fps_options, is_supported, normalize_modes,
 )
 from .capture import CameraSource, State
 from .collision import (
@@ -36,6 +35,7 @@ from .collision import (
     load_collision_settings, save_collision_settings,
 )
 from .config import CameraConfig, ConfigError, resolved_config, save_config
+from .probe import CapabilityProbe
 from .dashboard_widgets import (
     CalibrationWizardDialog, DroneSpace3DWidget, PlaybackDialog,
 )
@@ -153,12 +153,20 @@ class VideoView(QLabel):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, configs, parent=None):
+    def __init__(self, configs, parent=None, config_directory=None):
         super().__init__(parent)
         self.setWindowTitle("카메라 설정 / Camera settings")
         self.setMinimumWidth(760)
         self.configs = configs
         self.result_configs = None
+        self.config_directory = config_directory
+        self.probes = [None, None]
+        self._pending_best = [None, None]
+        self.probe_buttons = []
+        self.probe_timer = QTimer(self)
+        self.probe_timer.setInterval(33)
+        self.probe_timer.timeout.connect(self._poll_probes)
+        self.finished.connect(self._stop_probes)
         self.transports = []
         self.serials = [c.usb_serial for c in configs]
         self.fields = []
@@ -220,7 +228,11 @@ class SettingsDialog(QDialog):
                 lambda _value, i=index: self._fill_fps(i))
             self._fill_fps(index)
             probe = QPushButton("지원 범위 확인 / Probe device")
+            self.probe_buttons.append(probe)
             probe.clicked.connect(lambda checked=False, i=index: self.probe_capabilities(i))
+            for signal in (kind.currentTextChanged, source.textChanged,
+                           transport.currentIndexChanged, facing.currentIndexChanged):
+                signal.connect(lambda *_, i=index: self._invalidate_modes(i))
             best_resolution = QPushButton("최고 해상도 / Max resolution")
             best_resolution.clicked.connect(lambda checked=False, i=index: self.apply_best(i, False))
             best_fps = QPushButton("최고 FPS / Max FPS")
@@ -295,33 +307,46 @@ class SettingsDialog(QDialog):
         combo.blockSignals(False)
 
     def probe_capabilities(self, index):
-        """Enumerate what the selected device can really stream."""
+        """Start a cancellable query; all device I/O runs outside Qt."""
+        if self.probes[index] is not None:
+            return
         fields = self.fields[index]
-        kind = fields[1].currentText()
-        source = fields[2].text().strip()
         try:
-            if kind == "mjpeg":
-                modes = fetch_capabilities(source)
-            elif kind == "usb":
-                modes = probe_usb_modes(int(source))
-            elif kind == "file":
-                import cv2
-                capture = cv2.VideoCapture(source)
-                try:
-                    if not capture.isOpened():
-                        raise CapabilityError("동영상 파일을 열 수 없습니다.")
-                    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    fps = int(capture.get(cv2.CAP_PROP_FPS) or 30)
-                finally:
-                    capture.release()
-                modes = (StreamMode(width, height, max(1, fps)),)
-            else:
-                raise CapabilityError("RTSP는 기기별 지원 범위 조회 규격이 없어 실제 수신값으로 확인합니다.")
-        except (CapabilityError, ValueError) as error:
+            self.probes[index] = CapabilityProbe(
+                fields[1].currentText(), fields[2].text().strip(),
+                ["", "android", "ios"][self.transports[index].currentIndex()],
+                self.serials[index], directory=self.config_directory)
+        except (CapabilityError, UsbError) as error:
+            self._pending_best[index] = None
             self.supported_labels[index].setText(str(error))
             QMessageBox.warning(self, "지원 범위 확인", str(error))
             return
+        self.probe_buttons[index].setEnabled(False)
+        self.supported_labels[index].setText("지원 범위 확인 중… / Probing device…")
+        self.probe_timer.start()
+
+    def _poll_probes(self):
+        for index, probe in enumerate(self.probes):
+            if probe is None:
+                continue
+            try:
+                modes = probe.poll()
+                if modes is None:
+                    continue
+                self._set_modes(index, modes)
+            except CapabilityError as error:
+                self.supported_labels[index].setText(str(error))
+                self._pending_best[index] = None
+            probe.close()
+            self.probes[index] = None
+            self.probe_buttons[index].setEnabled(True)
+        if not any(self.probes):
+            self.probe_timer.stop()
+
+    def _set_modes(self, index, modes):
+        modes = normalize_modes(modes)
+        if not modes:
+            raise CapabilityError("수신기가 지원하는 해상도/FPS 조합이 없습니다.")
         self.device_modes[index] = modes
         best = best_resolution_mode(modes)
         fastest = best_fps_mode(modes)
@@ -331,10 +356,35 @@ class SettingsDialog(QDialog):
             "최종 확인은 연결 후 실제 수신 해상도·FPS 표시로 합니다.")
         self._fill_resolution(index)
         self._fill_fps(index)
+        pending = self._pending_best[index]
+        self._pending_best[index] = None
+        if pending is not None:
+            self.apply_best(index, pending)
+
+    def _invalidate_modes(self, index):
+        if self.probes[index] is not None:
+            self.probes[index].close()
+            self.probes[index] = None
+        self._pending_best[index] = None
+        self.device_modes[index] = None
+        self.probe_buttons[index].setEnabled(True)
+        self.supported_labels[index].setText("입력이 변경되었습니다. 지원 범위를 다시 확인하세요.")
+        self._fill_resolution(index)
+        self._fill_fps(index)
+
+    def _stop_probes(self, *_):
+        self.probe_timer.stop()
+        for index, probe in enumerate(self.probes):
+            if probe is not None:
+                probe.close()
+                self.probes[index] = None
+            self._pending_best[index] = None
 
     def apply_best(self, index, fps_priority):
         if self.device_modes[index] is None:
+            self._pending_best[index] = fps_priority
             self.probe_capabilities(index)
+            return
         modes = self.device_modes[index]
         if not modes:
             return
@@ -401,8 +451,9 @@ class SettingsDialog(QDialog):
             except UsbError as error:
                 QMessageBox.warning(dialog, "USB 설정", str(error))
                 return
-            self.transports[index].setCurrentIndex(platform.currentIndex() + 1)
             self.serials[index] = serial.text().strip()
+            self._invalidate_modes(index)
+            self.transports[index].setCurrentIndex(platform.currentIndex() + 1)
             self.fields[index][1].setCurrentText("mjpeg")
             self.fields[index][2].setText(address.text().strip())
             dialog.accept()
@@ -435,6 +486,10 @@ class MainWindow(QMainWindow):
         self.configs = configs
         self.config_path = config_path
         self.retired_tunnels = []
+        self._pending_rollback = None
+        self.rollback_timer = QTimer(self)
+        self.rollback_timer.setInterval(250)
+        self.rollback_timer.timeout.connect(self._verify_settings_rollback)
         self.setup_sources()
         self.sequences = [0, 0]
         self._latest_frames = [None, None]
@@ -1198,6 +1253,7 @@ class MainWindow(QMainWindow):
 
     def toggle(self, index):
         if self.sources[index].active:
+            self._cancel_settings_rollback()
             self.sources[index].disconnect()
         else:
             self.connect_camera(index)
@@ -1207,23 +1263,27 @@ class MainWindow(QMainWindow):
             self.connect_camera(i)
 
     def disconnect_all(self):
+        self._cancel_settings_rollback()
         for source in self.sources:
             source.disconnect()
 
     def edit_settings(self):
-        dialog = SettingsDialog(self.configs, self)
+        dialog = SettingsDialog(self.configs, self, config_directory=self.config_path.parent)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         self.apply_configs(dialog.result_configs)
 
     def apply_configs(self, new_configs):
-        old_configs = self.configs
+        # Repeated edits must retain the original fallback until a replacement
+        # has actually connected; a still-retrying configuration is not good.
+        old_configs = self._pending_rollback[0] if self._pending_rollback else self.configs
         was_active = [source.active for source in self.sources]
         try:
             save_config(self.config_path, new_configs)
         except OSError:
             QMessageBox.warning(self, "저장 오류", "설정 파일을 저장할 수 없습니다. 폴더 쓰기 권한을 확인하세요.")
             return
+        self._cancel_settings_rollback()
         self._teardown_sources()
         self.configs = new_configs
         self.setup_sources()
@@ -1233,7 +1293,7 @@ class MainWindow(QMainWindow):
                 self.connect_camera(index)
         if any(was_active):
             self._pending_rollback = (old_configs, was_active)
-            QTimer.singleShot(8000, self._verify_settings_rollback)
+            self.rollback_timer.start()
         self.refresh()
 
     def _teardown_sources(self):
@@ -1244,16 +1304,24 @@ class MainWindow(QMainWindow):
         for source in self.sources:
             source.close()
 
+    def _cancel_settings_rollback(self):
+        self.rollback_timer.stop()
+        self._pending_rollback = None
+
     def _verify_settings_rollback(self):
-        pending = getattr(self, "_pending_rollback", None)
+        pending = self._pending_rollback
         if pending is None:
             return
-        self._pending_rollback = None
         old_configs, was_active = pending
-        failed = [index for index, active in enumerate(was_active)
-                  if active and self.sources[index].status().state == State.ERROR]
+        states = [source.status().state for source in self.sources]
+        failed = [i for i, active in enumerate(was_active) if active and states[i] == State.ERROR]
         if not failed:
+            if any(active and states[i] in (State.CONNECTING, State.RECONNECTING, State.STOPPING)
+                   for i, active in enumerate(was_active)):
+                return  # Wait for the configured retry budget, not a fixed 8s.
+            self._cancel_settings_rollback()
             return
+        self._cancel_settings_rollback()
         try:
             save_config(self.config_path, old_configs)
         except OSError:
@@ -1489,6 +1557,9 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def shutdown(self):
+        self._cancel_settings_rollback()
+        for dialog in self.findChildren(SettingsDialog):
+            dialog._stop_probes()
         if self.recorder.active:
             self.recorder.stop()
         if self._ai_save_timer.isActive():
