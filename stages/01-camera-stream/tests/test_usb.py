@@ -75,6 +75,28 @@ def test_android_selects_usb_and_removes_only_its_forward(monkeypatch):
     assert calls[-1] == ("-s", "USB_SERIAL", "forward", "--remove", "tcp:12345")
 
 
+def test_relay_drains_final_response_after_upstream_half_close(monkeypatch):
+    left, right = socket.socketpair()
+    monkeypatch.setattr(usb.UsbTunnel, "_connect", lambda _: left)
+    tunnel = usb.UsbTunnel("ios", 8080)
+    payload = b'{"modes":[]}' * 10000  # Larger than a relay buffer.
+    def respond():
+        right.sendall(payload)
+        right.shutdown(socket.SHUT_WR)
+    writer = threading.Thread(target=respond, daemon=True)
+    try:
+        with socket.create_connection(("127.0.0.1", tunnel.port), timeout=3) as client:
+            writer.start()
+            received = bytearray()
+            while chunk := client.recv(4096):
+                received.extend(chunk)
+            assert bytes(received) == payload
+        writer.join(timeout=2)
+        assert not writer.is_alive()
+    finally:
+        tunnel.close(); tunnel.wait_closed(); right.close()
+
+
 def test_mux_frames_split_reads_and_connect_port_byte_order(monkeypatch):
     peers = []
     requests = []

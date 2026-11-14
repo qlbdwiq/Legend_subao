@@ -78,6 +78,8 @@ def test_settings_dialog_resolution_and_fps_are_independent(qapp):
 def test_settings_dialog_rejects_unsupported_probed_combination(qapp, monkeypatch):
     from drone_camera.capabilities import StreamMode
     dialog = SettingsDialog(defaults())
+    dialog.fields[0][1].setCurrentText("mjpeg")
+    dialog.fields[0][2].setText("http://127.0.0.1:8080/video")
     dialog.device_modes[0] = (StreamMode(3840, 2160, 60), StreamMode(1920, 1080, 240))
     dialog._fill_resolution(0)
     dialog._fill_fps(0)
@@ -93,8 +95,6 @@ def test_settings_dialog_rejects_unsupported_probed_combination(qapp, monkeypatc
                         lambda *args: warnings.append(args))
     dialog.fields[0][9].addItem("120 FPS", 120)
     dialog.fields[0][9].setCurrentIndex(dialog.fields[0][9].count() - 1)
-    dialog.fields[0][1].setCurrentText("mjpeg")
-    dialog.fields[0][2].setText("http://127.0.0.1:8080/video")
     dialog._validate()
     assert dialog.result_configs is None
     assert warnings
