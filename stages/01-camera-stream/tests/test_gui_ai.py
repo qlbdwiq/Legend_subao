@@ -190,6 +190,7 @@ def test_disconnect_resets_tracking_and_clears_overlay(qapp, open_window):
     wait_for(lambda: not window.sources[0].active, app=qapp)
     window.refresh()
     assert stub.resets == [0]                                        # camera 2 untouched
+    wait_for(lambda: window.sources[1].active and window.views[1]._detections is not None, app=qapp)
     assert window.views[0]._detections is None and window.views[1]._detections is not None
     before = len(stub.resets)
     window.connect_camera(0)
