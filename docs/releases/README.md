@@ -10,7 +10,7 @@
 | [v0.2.1](https://github.com/qlbdwiq/Legend_subao/releases/tag/v0.2.1) | Phase 01 | Windows 독립 실행 EXE |
 | [v0.3.0](https://github.com/qlbdwiq/Legend_subao/releases/tag/v0.3.0) | Phase 01 | Apple Silicon·Intel macOS DMG |
 | [v0.4.0](https://github.com/qlbdwiq/Legend_subao/releases/tag/v0.4.0) | Phase 01 | 카메라 해상도·FPS 선택 확장 |
-| [phase-02-v0.5.0](https://github.com/qlbdwiq/Legend_subao/releases/tag/phase-02-v0.5.0) | Phase 02 | YOLO11 탐지·ByteTrack 추적·바운딩 서클 (2D). macOS arm64 DMG·Windows EXE 제공, Intel Mac 미제공 |
+| [phase-02-v0.5.0](https://github.com/qlbdwiq/Legend_subao/releases/tag/phase-02-v0.5.0) | Phase 02 | YOLO11 탐지·ByteTrack 추적·바운딩 서클 (2D). macOS arm64/Intel DMG·Windows EXE 제공 |
 
 기존 `vX.Y.Z` 태그와 릴리즈는 보존됩니다. 새 릴리즈는
 `phase-NN-vX.Y.Z` 태그를 사용하면 제목에 `Phase NN`이 자동으로 붙습니다.
