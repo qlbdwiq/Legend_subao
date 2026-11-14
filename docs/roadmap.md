@@ -27,7 +27,7 @@
   충돌 위험 경고 정확도·지연 측정([현장 실험 절차서](stereo-3d-and-collision.md#5-실제-드론-2대--카메라-2대-현장-실험-절차-사전-준비-가이드)).
 - (Phase 02) 실제 비행 영상에서 탐지율·오탐·작은/먼 드론·프로펠러·역광, 두 드론 교차 시 ID 유지, Windows CPU PC의 AI FPS,
   Intel Mac(torch 2.2.2) 및 CUDA PC 동작.
-- iOS device와 두 번째 iOS 또는 Android 장치의 앱·코덱·MJPEG/RTSP 주소 확인.
+- iOS 또는 Android 장치 두 대의 앱·코덱·MJPEG/RTSP 주소 확인.
 - 같은 LAN에서 AP 클라이언트 격리·방화벽·장치 절전·화면 잠금·스트림 인증 확인.
 - Windows 10/11, Apple Silicon, 가능한 Intel Mac에서 권한·USB 드라이버·백엔드 점검.
 - 720p30 두 스트림의 수신 FPS, 지연, CPU·메모리, 장시간 동작, 네트워크 단절·복구 측정.
