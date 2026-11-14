@@ -148,6 +148,8 @@ class DroneKinematics3D:
     reprojection_error_px: float
     cam1_track_id: int | None
     cam2_track_id: int | None
+    drone_model: str = "unknown"
+    estimation_mode: str = "stereo"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -455,6 +457,8 @@ class CollisionAnalyzer:
             reprojection_error_px=pose.reprojection_error_px,
             cam1_track_id=pose.cam1_track_id,
             cam2_track_id=pose.cam2_track_id,
+            drone_model=pose.drone_model,
+            estimation_mode=pose.estimation_mode,
         )
 
     def _record_event_if_needed(
