@@ -21,6 +21,7 @@ def package(output: Path | None = None, version: str = __version__) -> Path:
              ROOT / "docs" / "releases" / f"v{version}.md",
              ROOT / "docs" / "mobile" / "README.md",
              ROOT / "docs" / "windows-exe.md", ROOT / "docs" / "ai-detection.md",
+             ROOT / "docs" / "stereo-3d-and-collision.md",
              ROOT / "scripts" / "make_test_video.py", ROOT / "scripts" / "package_release.py",
              STAGE / "requirements.txt", STAGE / "requirements-ultralytics.txt", STAGE / "config.example.json",
              STAGE / "README.md", STAGE / "pytest.ini"]

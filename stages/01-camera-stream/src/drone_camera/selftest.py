@@ -28,6 +28,33 @@ def model_check(config_path: Path) -> dict:
         return {"ok": False, "configured": True, "error": f"{type(error).__name__}: {error}"[:300]}
 
 
+def stereo_3d_collision_check() -> dict:
+    """Verify Phase 03~04 synthetic stereo 3D triangulation and collision risk analysis in frozen runtime."""
+    try:
+        from .calibration import create_synthetic_calibration, project_points_3d
+        from .collision import CollisionAnalyzer, RISK_UNKNOWN
+        from .stereo_3d import StereoTracker3D, triangulate_points
+        import numpy as np
+
+        calib = create_synthetic_calibration(baseline_m=2.0, convergence_deg=5.0)
+        pt = np.array([[0.3, -0.4, 6.0]], dtype=np.float64)
+        px1 = tuple(project_points_3d(pt, calib.camera_01)[0])
+        px2 = tuple(project_points_3d(pt, calib.camera_02, calib.R, calib.T)[0])
+        tri = triangulate_points(px1, px2, calib, detector_confidence=0.92)
+        err_m = float(np.linalg.norm(np.array(tri.xyz_m) - pt[0])) if tri is not None else 999.0
+        tracker = StereoTracker3D()
+        uncalib_res = tracker.process(None, None, calibration=None)
+        analyzer = CollisionAnalyzer()
+        unk = analyzer.analyze(uncalib_res)
+        return {
+            "ok": bool(tri is not None and err_m < 1e-3 and unk.risk_level == RISK_UNKNOWN),
+            "triangulation_error_m": round(err_m, 6),
+            "uncalibrated_risk": unk.risk_level,
+        }
+    except Exception as error:
+        return {"ok": False, "error": f"{type(error).__name__}: {error}"[:300]}
+
+
 def run(config_path: Path, report_path: Path) -> int:
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
@@ -77,6 +104,8 @@ def run(config_path: Path, report_path: Path) -> int:
             from .engine import runtime_report
             result["ai_runtime"] = runtime_report(config_path.parent / "ultralytics")
             result["ok"] = result["ok"] and result["ai_runtime"]["ok"]
+            result["stereo_3d_collision"] = stereo_3d_collision_check()
+            result["ok"] = result["ok"] and result["stereo_3d_collision"]["ok"]
             result["model_check"] = model_check(config_path)
             result["ok"] = result["ok"] and result["model_check"].get("ok", True)
         report_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
