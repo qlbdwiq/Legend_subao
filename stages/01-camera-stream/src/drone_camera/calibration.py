@@ -19,7 +19,19 @@ import cv2
 import numpy as np
 
 CALIBRATION_FILE_NAME = "stereo_calibration.json"
-CALIBRATION_TYPES = ("field", "synthetic")
+CALIBRATION_TYPES = ("field", "auto", "synthetic")
+CAMERA_LAYOUTS = ("horizontal", "vertical")
+
+# Physical diagonal span (meters) for camera-based distance & scale estimation
+MAVIC_3_SPAN_M = 0.38   # DJI Mavic 3 diagonal wheelbase / visual span (~38 cm)
+LITO_X1_SPAN_M = 0.18   # Lito X1 compact drone visual span (~18 cm)
+
+DRONE_SIZE_PRESETS: dict[str, tuple[str, float, float]] = {
+    "mavic3_litox1": ("DJI Mavic 3 (38cm) + Lito X1 (18cm)", MAVIC_3_SPAN_M, LITO_X1_SPAN_M),
+    "mavic3": ("DJI Mavic 3 (38cm)", MAVIC_3_SPAN_M, MAVIC_3_SPAN_M),
+    "litox1": ("Lito X1 (18cm)", LITO_X1_SPAN_M, LITO_X1_SPAN_M),
+    "mavic_mini": ("DJI Mavic Mini (24cm)", 0.24, 0.24),
+}
 
 
 class CalibrationError(ValueError):
@@ -483,9 +495,13 @@ def create_synthetic_calibration(
     dist_coeffs_02: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0),
     time_offset_s: float = 0.0,
     max_sync_delta_s: float = 0.10,
+    layout: str = "horizontal",
+    calibration_type: str = "synthetic",
     notes: str = "합성 스테레오 보정 (실험 전 소프트웨어 검증용)",
 ) -> StereoCalibration:
-    """Create a known stereo calibration rig with ``calibration_type='synthetic'``."""
+    """Create a stereo calibration rig for horizontal (left/right) or vertical (top/bottom) layout."""
+    if layout not in CAMERA_LAYOUTS:
+        raise CalibrationError(f"layout must be one of {CAMERA_LAYOUTS}.")
     width, height = int(image_size[0]), int(image_size[1])
     cx, cy = width / 2.0, height / 2.0
     k_tuple = (
@@ -496,16 +512,26 @@ def create_synthetic_calibration(
     intr_1 = CameraIntrinsics("camera-01", (width, height), k_tuple, dist_coeffs_01, rms_error=0.0)
     intr_2 = CameraIntrinsics("camera-02", (width, height), k_tuple, dist_coeffs_02, rms_error=0.0)
 
-    # Camera 2 is located at (+baseline_m, 0, 0) in Camera 1 frame, rotated by convergence_deg around Y.
-    yaw_rad = math.radians(float(convergence_deg))
-    cos_y, sin_y = math.cos(yaw_rad), math.sin(yaw_rad)
-    # R transforms vectors from cam1 to cam2
-    r_mat = np.array([
-        [cos_y, 0.0, sin_y],
-        [0.0, 1.0, 0.0],
-        [-sin_y, 0.0, cos_y],
-    ], dtype=np.float64)
-    cam2_pos_in_cam1 = np.array([float(baseline_m), 0.0, 0.0], dtype=np.float64)
+    angle_rad = math.radians(float(convergence_deg))
+    c_a, s_a = math.cos(angle_rad), math.sin(angle_rad)
+    if layout == "vertical":
+        # Camera 1 is on top (0, 0, 0); Camera 2 is below at (0, +baseline_m, 0) in Cam1 frame (+Y is down).
+        # Positive convergence_deg tilts Camera 2 upward around X toward Camera 1's viewing axis.
+        r_mat = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, c_a, s_a],
+            [0.0, -s_a, c_a],
+        ], dtype=np.float64)
+        cam2_pos_in_cam1 = np.array([0.0, float(baseline_m), 0.0], dtype=np.float64)
+    else:
+        # Camera 1 is on left (0, 0, 0); Camera 2 is on right at (+baseline_m, 0, 0), rotated around Y.
+        r_mat = np.array([
+            [c_a, 0.0, s_a],
+            [0.0, 1.0, 0.0],
+            [-s_a, 0.0, c_a],
+        ], dtype=np.float64)
+        cam2_pos_in_cam1 = np.array([float(baseline_m), 0.0, 0.0], dtype=np.float64)
+
     t_vec = -r_mat @ cam2_pos_in_cam1
     return StereoCalibration(
         camera_01=intr_1,
@@ -513,8 +539,195 @@ def create_synthetic_calibration(
         rotation=tuple(tuple(float(v) for v in row) for row in r_mat),
         translation=tuple(float(v) for v in t_vec),
         baseline_m=float(baseline_m),
-        calibration_type="synthetic",
+        calibration_type=calibration_type,
         rms_error=0.0,
+        time_offset_s=time_offset_s,
+        max_sync_delta_s=max_sync_delta_s,
+        notes=notes,
+    )
+
+
+# ----------------------------- checkerboard-free automatic stereo calibration
+def extract_matched_scene_keypoints(
+    image_01: np.ndarray,
+    image_02: np.ndarray,
+    max_features: int = 1500,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract matched 2D feature points (Nx2 float64) from two camera frames without a checkerboard."""
+    if image_01 is None or image_02 is None or image_01.size == 0 or image_02.size == 0:
+        raise CalibrationError("자동 보정을 위해 두 카메라의 유효한 영상 프레임이 필요합니다.")
+    gray1 = cv2.cvtColor(image_01, cv2.COLOR_BGR2GRAY) if image_01.ndim == 3 else image_01
+    gray2 = cv2.cvtColor(image_02, cv2.COLOR_BGR2GRAY) if image_02.ndim == 3 else image_02
+
+    orb = cv2.ORB_create(nfeatures=max(200, int(max_features)))
+    kp1, des1 = orb.detectAndCompute(gray1, None)
+    kp2, des2 = orb.detectAndCompute(gray2, None)
+
+    pts1_list: list[tuple[float, float]] = []
+    pts2_list: list[tuple[float, float]] = []
+    if des1 is not None and des2 is not None and len(kp1) >= 8 and len(kp2) >= 8:
+        matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+        knn = matcher.knnMatch(des1, des2, k=2)
+        for pair in knn:
+            if len(pair) == 2:
+                m, n = pair
+                if m.distance < 0.78 * n.distance:
+                    pts1_list.append(kp1[m.queryIdx].pt)
+                    pts2_list.append(kp2[m.trainIdx].pt)
+
+    if len(pts1_list) < 12 and hasattr(cv2, "SIFT_create"):
+        sift = cv2.SIFT_create(nfeatures=max(200, int(max_features)))
+        skp1, sdes1 = sift.detectAndCompute(gray1, None)
+        skp2, sdes2 = sift.detectAndCompute(gray2, None)
+        if sdes1 is not None and sdes2 is not None and len(skp1) >= 8 and len(skp2) >= 8:
+            bf = cv2.BFMatcher(cv2.NORM_L2)
+            knn = bf.knnMatch(sdes1, sdes2, k=2)
+            pts1_list.clear()
+            pts2_list.clear()
+            for pair in knn:
+                if len(pair) == 2:
+                    m, n = pair
+                    if m.distance < 0.78 * n.distance:
+                        pts1_list.append(skp1[m.queryIdx].pt)
+                        pts2_list.append(skp2[m.trainIdx].pt)
+
+    if len(pts1_list) < 8:
+        raise CalibrationError(
+            f"두 화면에서 공통 배경 특징점이 부족합니다 ({len(pts1_list)}개 발견, 최소 8개 필요). "
+            "두 카메라가 같은 공간을 바라보도록 조정하거나 '드론 궤적 자동 보정' 또는 '상·하/좌·우 간편 배치'를 사용하세요."
+        )
+    return np.array(pts1_list, dtype=np.float64), np.array(pts2_list, dtype=np.float64)
+
+
+def calibrate_from_matched_points(
+    pts_01: np.ndarray,
+    pts_02: np.ndarray,
+    image_size_01: tuple[int, int] = (1280, 720),
+    image_size_02: tuple[int, int] | None = None,
+    focal_px: float = 900.0,
+    baseline_m: float = 1.5,
+    drone_diameters_px_01: list[float] | np.ndarray | None = None,
+    drone_real_sizes_m: list[float] | np.ndarray | None = None,
+    calibration_type: str = "auto",
+    time_offset_s: float = 0.0,
+    max_sync_delta_s: float = 0.10,
+    notes: str = "체커보드 없는 자동 스테레오 보정 (Essential Matrix)",
+) -> StereoCalibration:
+    """Recover stereo extrinsic R, T (and optional drone-size-based metric baseline) from matched 2D points."""
+    p1 = np.asarray(pts_01, dtype=np.float64).reshape(-1, 2)
+    p2 = np.asarray(pts_02, dtype=np.float64).reshape(-1, 2)
+    if len(p1) != len(p2) or len(p1) < 8:
+        raise CalibrationError(f"자동 보정에는 최소 8쌍 이상의 대응점이 필요합니다 (현재 {len(p1)}쌍).")
+    if image_size_02 is None:
+        image_size_02 = image_size_01
+
+    w1, h1 = int(image_size_01[0]), int(image_size_01[1])
+    w2, h2 = int(image_size_02[0]), int(image_size_02[1])
+    k1_tuple = ((float(focal_px), 0.0, w1 / 2.0), (0.0, float(focal_px), h1 / 2.0), (0.0, 0.0, 1.0))
+    k2_tuple = ((float(focal_px), 0.0, w2 / 2.0), (0.0, float(focal_px), h2 / 2.0), (0.0, 0.0, 1.0))
+    zero_d = (0.0, 0.0, 0.0, 0.0, 0.0)
+    intr_1 = CameraIntrinsics("camera-01", (w1, h1), k1_tuple, zero_d, rms_error=0.0)
+    intr_2 = CameraIntrinsics("camera-02", (w2, h2), k2_tuple, zero_d, rms_error=0.0)
+
+    # Convert to normalized camera coordinates so Cam1 and Cam2 can even have different resolutions
+    norm1 = undistort_points_normalized(p1, intr_1)
+    norm2 = undistort_points_normalized(p2, intr_2)
+    thresh_norm = 2.5 / max(100.0, float(focal_px))
+
+    E, mask = cv2.findEssentialMat(
+        norm1, norm2, np.eye(3, dtype=np.float64),
+        method=cv2.RANSAC, prob=0.999, threshold=thresh_norm,
+    )
+    if E is None or E.shape != (3, 3):
+        raise CalibrationError("Essential Matrix 계산에 실패했습니다. 점들이 한 직선이나 평면에만 몰려 있지 않은지 확인하세요.")
+
+    inliers, R, t_unit, pose_mask = cv2.recoverPose(
+        E, norm1, norm2, np.eye(3, dtype=np.float64), mask=mask
+    )
+    if inliers < 5:
+        raise CalibrationError(f"유효한 3D 인라이어 대응점이 부족합니다 ({inliers}개, 최소 5개 필요).")
+
+    t_flat = t_unit.reshape(3).astype(np.float64)
+    t_norm = float(np.linalg.norm(t_flat))
+    if t_norm <= 1e-6:
+        raise CalibrationError("카메라 간 이동 방향 벡터를 복원할 수 없습니다.")
+    t_dir = t_flat / t_norm
+
+    # Optional: automatic baseline scale (meters) recovery from known physical drone sizes (e.g. Mavic 3 0.38m, Lito X1 0.18m)
+    resolved_baseline = float(baseline_m)
+    if drone_diameters_px_01 is not None and drone_real_sizes_m is not None:
+        diams = np.asarray(drone_diameters_px_01, dtype=np.float64).reshape(-1)
+        sizes = np.asarray(drone_real_sizes_m, dtype=np.float64).reshape(-1)
+        if len(diams) == len(p1) and len(sizes) == len(p1):
+            p1_mat = np.hstack((np.eye(3, dtype=np.float64), np.zeros((3, 1), dtype=np.float64)))
+            p2_mat = np.hstack((R, t_dir.reshape(3, 1)))
+            homog = cv2.triangulatePoints(p1_mat, p2_mat, norm1.T, norm2.T)
+            w_h = homog[3]
+            scale_samples: list[float] = []
+            for idx in range(len(p1)):
+                if abs(w_h[idx]) > 1e-9 and diams[idx] > 2.0 and sizes[idx] > 0.02:
+                    z_unit = float(homog[2, idx] / w_h[idx])
+                    if z_unit > 0.1:
+                        z_metric = float(focal_px) * float(sizes[idx]) / float(diams[idx])
+                        b_est = z_metric / z_unit
+                        if 0.05 <= b_est <= 100.0:
+                            scale_samples.append(b_est)
+            if scale_samples:
+                resolved_baseline = float(np.median(scale_samples))
+
+    t_scaled = tuple(float(v * resolved_baseline) for v in t_dir)
+    r_tuple = tuple(tuple(float(v) for v in row) for row in R)
+
+    # Compute epipolar RMS error in pixels over inlier mask
+    temp_calib = StereoCalibration(
+        camera_01=intr_1,
+        camera_02=intr_2,
+        rotation=r_tuple,
+        translation=t_scaled,
+        baseline_m=resolved_baseline,
+        calibration_type=calibration_type,
+        rms_error=0.0,
+        time_offset_s=time_offset_s,
+        max_sync_delta_s=max_sync_delta_s,
+        notes=notes,
+    )
+    f_mat = temp_calib.fundamental_matrix()
+    inlier_indices = [i for i in range(len(p1)) if pose_mask is None or pose_mask[i, 0] > 0]
+    sq_errs: list[float] = []
+    for i in inlier_indices:
+        x1_h = np.array([p1[i, 0], p1[i, 1], 1.0], dtype=np.float64)
+        x2_h = np.array([p2[i, 0], p2[i, 1], 1.0], dtype=np.float64)
+        fx1 = f_mat @ x1_h
+        ftx2 = f_mat.T @ x2_h
+        denom = fx1[0] ** 2 + fx1[1] ** 2 + ftx2[0] ** 2 + ftx2[1] ** 2
+        if denom > 1e-12:
+            sampson = float((x2_h @ fx1) ** 2 / denom)
+            sq_errs.append(sampson)
+    rms_px = math.sqrt(sum(sq_errs) / len(sq_errs)) if sq_errs else 0.0
+    return replace(temp_calib, rms_error=float(rms_px))
+
+
+def auto_calibrate_from_scene_frames(
+    frame_01: np.ndarray,
+    frame_02: np.ndarray,
+    focal_px: float = 900.0,
+    baseline_m: float = 1.5,
+    time_offset_s: float = 0.0,
+    max_sync_delta_s: float = 0.10,
+    notes: str = "화면 배경 특징점 기반 자동 스테레오 보정 (체커보드 없음)",
+) -> StereoCalibration:
+    """One-click checkerboard-free stereo calibration from two live camera frames."""
+    pts1, pts2 = extract_matched_scene_keypoints(frame_01, frame_02)
+    h1, w1 = frame_01.shape[:2]
+    h2, w2 = frame_02.shape[:2]
+    return calibrate_from_matched_points(
+        pts1,
+        pts2,
+        image_size_01=(w1, h1),
+        image_size_02=(w2, h2),
+        focal_px=focal_px,
+        baseline_m=baseline_m,
+        calibration_type="auto",
         time_offset_s=time_offset_s,
         max_sync_delta_s=max_sync_delta_s,
         notes=notes,
@@ -582,3 +795,4 @@ def render_synthetic_chessboard_image(
             color = (20, 20, 20) if (r + c) % 2 == 0 else (245, 245, 245)
             cv2.fillConvexPoly(image, np.round(proj_quad).astype(np.int32), color, lineType=cv2.LINE_AA)
     return image
+

@@ -29,8 +29,10 @@ from PySide6.QtWidgets import (
 )
 
 from .calibration import (
+    DRONE_SIZE_PRESETS,
     CalibrationError,
     StereoCalibration,
+    auto_calibrate_from_scene_frames,
     calibrate_stereo_cameras,
     create_synthetic_calibration,
     detect_chessboard_corners,
@@ -247,31 +249,43 @@ class DroneSpace3DWidget(QWidget):
             painter.drawEllipse(QPointF(*pt_2d), 6, 6)
             x, y, z = kin.xyz_m
             painter.setPen(color)
+            model_tag = f" [{kin.drone_model}]" if getattr(kin, "drone_model", "unknown") not in ("", "unknown") else ""
             painter.drawText(
                 int(pt_2d[0]) + 8,
                 int(pt_2d[1]) - 8,
-                f"D{kin.drone_id} ({x:+.2f}, {y:+.2f}, {z:.2f})m",
+                f"D{kin.drone_id}{model_tag} ({x:+.2f}, {y:+.2f}, {z:.2f})m",
             )
 
         # Header overlay inside 3D widget
         painter.setPen(QColor("#94a3b8"))
         mode_names = {"3d": "3D 사선 뷰 (드래그 회전)", "top": "상면도 (X-Z)", "front": "정면도 (X-Y)"}
-        status_note = (
-            "미보정 — 3D 미출력" if self._calibration is None
-            else ("합성 보정(실험용)" if self._calibration.calibration_type == "synthetic" else "현장 실측 보정")
-        )
+        if self._calibration is None:
+            status_note = "미보정 — 3D 미출력"
+        elif self._calibration.calibration_type == "synthetic":
+            status_note = "합성 보정(실험용)"
+        elif self._calibration.calibration_type == "auto":
+            status_note = "자동 보정(체커보드 없음)"
+        else:
+            status_note = "현장 실측 보정"
         painter.drawText(10, 18, f"{mode_names.get(self._view_mode, '3D')} · {status_note}")
         painter.end()
 
 
 class CalibrationWizardDialog(QDialog):
-    """Step-by-step camera calibration wizard for field chessboard calibration & synthetic presets."""
+    """Step-by-step camera calibration wizard for checkerboard-free auto-calibration, field chessboard, & presets."""
 
-    def __init__(self, current_calibration: StereoCalibration | None, frame_provider=None, parent=None):
+    def __init__(
+        self,
+        current_calibration: StereoCalibration | None,
+        frame_provider=None,
+        stereo_tracker=None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("스테레오 카메라 보정 마법사 / Stereo Calibration Wizard")
-        self.setMinimumWidth(820)
+        self.setMinimumWidth(860)
         self.frame_provider = frame_provider  # Callable returning (frame1, frame2) or (None, None)
+        self.stereo_tracker = stereo_tracker
         self.result_calibration: StereoCalibration | None = None
         self.captured_corners_01: list[np.ndarray] = []
         self.captured_corners_02: list[np.ndarray] = []
@@ -282,9 +296,10 @@ class CalibrationWizardDialog(QDialog):
         layout = QVBoxLayout(self)
 
         guide = QLabel(
-            "1. [현장 보정] 체커보드 판을 두 카메라가 동시에 볼 수 있는 겹침 영역에 들고 다양한 각도·거리에서 최소 5쌍 이상 캡처하세요.\n"
-            "2. 줄자로 두 카메라 렌즈 중심 사이의 실제 거리(기준선 길이, m)를 측정하여 입력하면 스케일 정확도가 향상됩니다.\n"
-            "3. [소프트웨어 검증용] 실제 장비 없이 테스트할 때는 아래 '합성 보정 프리셋 생성'을 사용하세요 (현장 보정 완료로 표시되지 않음)."
+            "1. [체커보드 없는 자동 보정 — 추천] 위·아래(상·하) 또는 좌·우로 설치한 두 카메라로 같은 공간/배경을 비추고\n"
+            "   '배경 특징점 자동 보정' 또는 '드론 비행 궤적 자동 보정 (매빅3·리토X1 크기 기반)'을 누르면 체커보드 없이 즉시 보정됩니다.\n"
+            "2. [상·하 / 좌·우 간편 배치] 두 카메라 간 높이/간격(m)만 입력하고 '상·하 / 좌·우 간편 보정 바로 적용'을 눌러도 바로 작동합니다.\n"
+            "3. [정밀 체커보드 보정] 체커보드 판이 있다면 최소 5쌍 이상 캡처하여 정밀 보정할 수도 있습니다."
         )
         guide.setWordWrap(True)
         guide.setStyleSheet("color: #cbd5e1; background: #0f172a; padding: 8px; border-radius: 6px;")
@@ -292,9 +307,22 @@ class CalibrationWizardDialog(QDialog):
 
         top_row = QHBoxLayout()
 
-        # Left group: Chessboard & Extrinsic settings
-        board_group = QGroupBox("체커보드 및 동기화·대응 기준 설정")
+        # Left group: Layout, Drone Preset, Chessboard & Extrinsic settings
+        board_group = QGroupBox("카메라 배치(위·아래/좌·우) · 기체(매빅3+리토X1) · 체커보드 설정")
         form = QFormLayout(board_group)
+
+        self.layout_combo = QComboBox()
+        self.layout_combo.addItem("상·하 배치 (위 Cam1 · 아래 Cam2)", "vertical")
+        self.layout_combo.addItem("좌·우 배치 (좌 Cam1 · 우 Cam2)", "horizontal")
+
+        self.drone_preset_combo = QComboBox()
+        for preset_key, (preset_label, _p_m, _s_m) in DRONE_SIZE_PRESETS.items():
+            self.drone_preset_combo.addItem(preset_label, preset_key)
+        if self.stereo_tracker is not None and hasattr(self.stereo_tracker, "drone_preset"):
+            idx = self.drone_preset_combo.findData(self.stereo_tracker.drone_preset)
+            if idx >= 0:
+                self.drone_preset_combo.setCurrentIndex(idx)
+
         self.cols_spin = QSpinBox()
         self.cols_spin.setRange(3, 25)
         self.cols_spin.setValue(7)
@@ -307,11 +335,12 @@ class CalibrationWizardDialog(QDialog):
         self.square_mm_spin.setValue(30.0)
         self.square_mm_spin.setSuffix(" mm")
 
-        self.override_baseline_check = QCheckBox("실측 기준선 길이(Baseline) 직접 지정")
+        self.override_baseline_check = QCheckBox("두 카메라 간격(Baseline, 위·아래 높이차) 지정")
+        self.override_baseline_check.setChecked(True)
         self.baseline_spin = QDoubleSpinBox()
         self.baseline_spin.setRange(0.05, 500.0)
         self.baseline_spin.setDecimals(3)
-        self.baseline_spin.setValue(current_calibration.baseline_m if current_calibration else 2.0)
+        self.baseline_spin.setValue(current_calibration.baseline_m if current_calibration else 1.5)
         self.baseline_spin.setSuffix(" m")
 
         self.time_offset_spin = QDoubleSpinBox()
@@ -334,21 +363,30 @@ class CalibrationWizardDialog(QDialog):
         self.max_reproj_spin.setValue(current_calibration.max_reprojection_error_px if current_calibration else 15.0)
         self.max_reproj_spin.setSuffix(" px")
 
-        form.addRow("체커보드 가로 내부 코너 (Cols)", self.cols_spin)
-        form.addRow("체커보드 세로 내부 코너 (Rows)", self.rows_spin)
-        form.addRow("사각형 한 변 길이 (Square size)", self.square_mm_spin)
+        form.addRow("카메라 설치 배치", self.layout_combo)
+        form.addRow("사용 드론 기체 프리셋", self.drone_preset_combo)
         form.addRow(self.override_baseline_check, self.baseline_spin)
         form.addRow("카메라 2 시간 보정 오프셋", self.time_offset_spin)
         form.addRow("최대 허용 프레임 시간차", self.max_sync_spin)
         form.addRow("최대 허용 재투영 오차", self.max_reproj_spin)
+        form.addRow("체커보드 가로 코너 (Cols)", self.cols_spin)
+        form.addRow("체커보드 세로 코너 (Rows)", self.rows_spin)
+        form.addRow("체커보드 사각형 한 변", self.square_mm_spin)
         top_row.addWidget(board_group, 1)
 
-        # Right group: Capture & Calibration execution
-        action_group = QGroupBox("코너 캡처 및 보정 계산")
+        # Right group: Auto-Calibration, Quick Layout, & Chessboard Capture
+        action_group = QGroupBox("자동 보정 (체커보드 없음) 및 체커보드 캡처")
         action_col = QVBoxLayout(action_group)
-        self.capture_status_label = QLabel("캡처된 체커보드 쌍: 0쌍 (최소 3쌍 필요, 5~15쌍 권장)")
+        self.capture_status_label = QLabel("캡처된 체커보드 쌍: 0쌍 (자동 보정 사용 시 체커보드 불필요)")
         self.capture_status_label.setWordWrap(True)
         action_col.addWidget(self.capture_status_label)
+
+        btn_quick_layout = QPushButton("★ 상·하(위·아래) / 좌·우 간편 배치 보정 바로 적용 (체커보드 없음)")
+        btn_quick_layout.clicked.connect(self.apply_quick_layout_preset)
+        btn_auto_scene = QPushButton("★ 현재 카메라 화면 배경 특징점으로 자동 보정 (체커보드 없음)")
+        btn_auto_scene.clicked.connect(self.run_auto_scene_calibration)
+        btn_auto_traj = QPushButton("★ 드론 비행 궤적 자동 보정 (매빅3·리토X1 크기로 간격 자동계산)")
+        btn_auto_traj.clicked.connect(self.run_auto_trajectory_calibration)
 
         btn_capture_live = QPushButton("현재 두 카메라 화면에서 체커보드 코너 캡처")
         btn_capture_live.clicked.connect(self.capture_from_live_cameras)
@@ -361,7 +399,16 @@ class CalibrationWizardDialog(QDialog):
         btn_synth_preset = QPushButton("실험 전 검증용 합성(Synthetic) 보정 프리셋 바로 적용")
         btn_synth_preset.clicked.connect(self.apply_synthetic_preset)
 
-        for b in (btn_capture_live, btn_clear_pairs, btn_run_calib, btn_synth_samples, btn_synth_preset):
+        for b in (
+            btn_quick_layout,
+            btn_auto_scene,
+            btn_auto_traj,
+            btn_capture_live,
+            btn_clear_pairs,
+            btn_run_calib,
+            btn_synth_samples,
+            btn_synth_preset,
+        ):
             action_col.addWidget(b)
 
         self.result_label = QLabel("보정 결과: 아직 계산되지 않음")
@@ -383,6 +430,84 @@ class CalibrationWizardDialog(QDialog):
         self.captured_corners_01.clear()
         self.captured_corners_02.clear()
         self.capture_status_label.setText("캡처된 체커보드 쌍: 0쌍")
+
+    def apply_quick_layout_preset(self) -> None:
+        try:
+            cam_layout = self.layout_combo.currentData() or "vertical"
+            calib = create_synthetic_calibration(
+                image_size=(1280, 720),
+                focal_px=900.0,
+                baseline_m=self.baseline_spin.value(),
+                convergence_deg=0.0,
+                time_offset_s=self.time_offset_spin.value(),
+                max_sync_delta_s=self.max_sync_spin.value(),
+                layout=cam_layout,
+                calibration_type="auto",
+            )
+            calib = replace(calib, max_reprojection_error_px=self.max_reproj_spin.value())
+            self.result_calibration = calib
+            if self.stereo_tracker is not None:
+                self.stereo_tracker.drone_preset = self.drone_preset_combo.currentData() or "mavic3_litox1"
+            layout_kr = "상·하(위·아래)" if cam_layout == "vertical" else "좌·우"
+            self.result_label.setText(
+                f"간편 배치 보정 준비됨 [자동/{layout_kr}] · 카메라 간격 {calib.baseline_m:.2f} m · "
+                f"기체: {self.drone_preset_combo.currentText()}"
+            )
+        except CalibrationError as exc:
+            QMessageBox.warning(self, "간편 배치 오류", str(exc))
+
+    def run_auto_scene_calibration(self) -> None:
+        if self.frame_provider is None:
+            QMessageBox.warning(self, "배경 특징점 자동 보정", "연결된 카메라 영상 공급자가 없습니다.")
+            return
+        frame1, frame2 = self.frame_provider()
+        if frame1 is None or frame2 is None:
+            QMessageBox.warning(
+                self,
+                "배경 특징점 자동 보정",
+                "두 카메라가 모두 연결되어 같은 비행 공간(배경)을 비추고 있어야 합니다.",
+            )
+            return
+        try:
+            calib = auto_calibrate_from_scene_frames(
+                frame1.image,
+                frame2.image,
+                focal_px=900.0,
+                baseline_m=self.baseline_spin.value(),
+                time_offset_s=self.time_offset_spin.value(),
+                max_sync_delta_s=self.max_sync_spin.value(),
+            )
+            calib = replace(calib, max_reprojection_error_px=self.max_reproj_spin.value())
+            self.result_calibration = calib
+            if self.stereo_tracker is not None:
+                self.stereo_tracker.drone_preset = self.drone_preset_combo.currentData() or "mavic3_litox1"
+            self.result_label.setText(
+                f"배경 특징점 자동 보정 완료! [체커보드 없음] · 간격 {calib.baseline_m:.2f} m · "
+                f"에피폴라 오차 {calib.rms_error:.2f} px ({calib.notes})"
+            )
+        except CalibrationError as exc:
+            QMessageBox.warning(self, "배경 특징점 자동 보정 오류", str(exc))
+
+    def run_auto_trajectory_calibration(self) -> None:
+        if self.stereo_tracker is None:
+            QMessageBox.warning(self, "궤적 자동 보정", "스테레오 추적기가 연결되지 않았습니다.")
+            return
+        self.stereo_tracker.drone_preset = self.drone_preset_combo.currentData() or "mavic3_litox1"
+        try:
+            calib = self.stereo_tracker.auto_calibrate_from_trajectories(
+                focal_px=900.0,
+                fallback_baseline_m=self.baseline_spin.value(),
+                time_offset_s=self.time_offset_spin.value(),
+                max_sync_delta_s=self.max_sync_spin.value(),
+            )
+            calib = replace(calib, max_reprojection_error_px=self.max_reproj_spin.value())
+            self.result_calibration = calib
+            self.result_label.setText(
+                f"드론 비행 궤적 자동 보정 완료! · 기체 크기로 자동 계산된 카메라 간격: {calib.baseline_m:.2f} m · "
+                f"오차 {calib.rms_error:.2f} px"
+            )
+        except (CalibrationError, ValueError) as exc:
+            QMessageBox.warning(self, "드론 궤적 자동 보정 안내", str(exc))
 
     def capture_from_live_cameras(self) -> None:
         if self.frame_provider is None:
@@ -473,6 +598,7 @@ class CalibrationWizardDialog(QDialog):
 
     def apply_synthetic_preset(self) -> None:
         try:
+            cam_layout = self.layout_combo.currentData() or "horizontal"
             calib = create_synthetic_calibration(
                 image_size=(1280, 720),
                 focal_px=900.0,
@@ -480,6 +606,7 @@ class CalibrationWizardDialog(QDialog):
                 convergence_deg=0.0,
                 time_offset_s=self.time_offset_spin.value(),
                 max_sync_delta_s=self.max_sync_spin.value(),
+                layout=cam_layout,
             )
             calib = replace(calib, max_reprojection_error_px=self.max_reproj_spin.value())
             self.result_calibration = calib

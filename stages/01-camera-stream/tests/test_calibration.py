@@ -7,9 +7,13 @@ import numpy as np
 import pytest
 
 from drone_camera.calibration import (
+    LITO_X1_SPAN_M,
+    MAVIC_3_SPAN_M,
     CalibrationError,
     CameraIntrinsics,
     StereoCalibration,
+    auto_calibrate_from_scene_frames,
+    calibrate_from_matched_points,
     calibrate_single_camera,
     calibrate_stereo_cameras,
     calibration_path_for,
@@ -177,3 +181,51 @@ def test_invalid_calibration_data_is_rejected(bad_Updater, tmp_path):
     path.write_text(json.dumps(valid), encoding="utf-8")
     with pytest.raises(CalibrationError):
         load_calibration(path)
+
+
+def test_vertical_top_bottom_camera_layout_and_checkerboard_free_calibration():
+    # Top Camera 1 at (0,0,0), Bottom Camera 2 at (0, +1.6m, 0) tilted up by 4 degrees
+    true_calib = create_synthetic_calibration(
+        image_size=(1280, 720),
+        focal_px=900.0,
+        baseline_m=1.60,
+        convergence_deg=4.0,
+        layout="vertical",
+        calibration_type="auto",
+    )
+    c2_center = true_calib.camera_2_center_in_cam1()
+    assert c2_center[0] == pytest.approx(0.0, abs=1e-6)
+    assert c2_center[1] == pytest.approx(1.60, abs=1e-6)
+    assert c2_center[2] == pytest.approx(0.0, abs=1e-6)
+
+    # Generate 24 3D points in flight volume and project to both cameras
+    rng = np.random.default_rng(42)
+    pts_3d = np.column_stack([
+        rng.uniform(-2.5, 2.5, 24),
+        rng.uniform(-1.5, 1.5, 24),
+        rng.uniform(4.0, 10.0, 24),
+    ])
+    pts_01 = project_points_3d(pts_3d, true_calib.camera_01)
+    pts_02 = project_points_3d(pts_3d, true_calib.camera_02, true_calib.R, true_calib.T)
+
+    # Also compute pixel diameters for DJI Mavic 3 (0.38m) on first 12 points and Lito X1 (0.18m) on next 12
+    real_sizes = [MAVIC_3_SPAN_M if i < 12 else LITO_X1_SPAN_M for i in range(24)]
+    diams_px = [900.0 * real_sizes[i] / pts_3d[i, 2] for i in range(24)]
+
+    # Recover R, T, AND metric baseline_m automatically from Mavic 3 / Lito X1 sizes without a tape measure!
+    auto_calib = calibrate_from_matched_points(
+        pts_01,
+        pts_02,
+        image_size_01=(1280, 720),
+        image_size_02=(1280, 720),
+        focal_px=900.0,
+        baseline_m=1.0,  # Fallback ignored when drone sizes are supplied
+        drone_diameters_px_01=diams_px,
+        drone_real_sizes_m=real_sizes,
+        calibration_type="auto",
+    )
+    assert auto_calib.calibration_type == "auto"
+    assert auto_calib.baseline_m == pytest.approx(1.60, rel=0.03)
+    np.testing.assert_allclose(auto_calib.R, true_calib.R, atol=0.02)
+    np.testing.assert_allclose(auto_calib.T, true_calib.T, atol=0.05)
+
