@@ -238,3 +238,67 @@ def test_subframe_velocity_interpolation_improves_moving_drone_triangulation():
     t_mid = 0.5 * (t1 + t2)
     expected_mid_xyz = (-1.0 + 4.0 * (t_mid - 1.0), 0.2, 6.0)
     assert math.dist(res.drones[0].xyz_m, expected_mid_xyz) < 0.05
+
+
+def test_mavic3_and_litox1_identification_and_trajectory_auto_calibration():
+    from drone_camera.calibration import LITO_X1_SPAN_M, MAVIC_3_SPAN_M
+    from drone_camera.stereo_3d import STEREO_STATUS_MONOCULAR
+
+    # Top/bottom vertical camera layout (Cam1 on top, Cam2 1.5m below)
+    true_calib = create_synthetic_calibration(
+        focal_px=900.0, baseline_m=1.50, convergence_deg=0.0, layout="vertical", calibration_type="auto"
+    )
+    tracker = StereoTracker3D(drone_preset="mavic3_litox1")
+
+    # Feed 12 frames of drone model A (0.38m) and drone model B (0.18m) flying across the scene
+    rng = np.random.default_rng(123)
+    for step in range(12):
+        t = 10.0 + step * 0.2
+        mavic_xyz = np.array([[rng.uniform(-2.0, -0.3), rng.uniform(-1.0, 1.0), rng.uniform(5.0, 9.0)]])
+        lito_xyz = np.array([[rng.uniform(0.3, 2.0), rng.uniform(-1.0, 1.0), rng.uniform(5.0, 9.0)]])
+
+        m_px1 = tuple(project_points_3d(mavic_xyz, true_calib.camera_01)[0])
+        m_px2 = tuple(project_points_3d(mavic_xyz, true_calib.camera_02, true_calib.R, true_calib.T)[0])
+        l_px1 = tuple(project_points_3d(lito_xyz, true_calib.camera_01)[0])
+        l_px2 = tuple(project_points_3d(lito_xyz, true_calib.camera_02, true_calib.R, true_calib.T)[0])
+
+        # Safe radius = 1.2 * base_radius = 1.2 * (0.5 * f * D / Z)
+        m_safe_r = 1.2 * 0.5 * 900.0 * MAVIC_3_SPAN_M / float(mavic_xyz[0, 2])
+        l_safe_r = 1.2 * 0.5 * 900.0 * LITO_X1_SPAN_M / float(lito_xyz[0, 2])
+
+        det1 = _make_frame_det(
+            "camera-01",
+            [
+                _make_obs("camera-01", 1, m_px1, t_mono=t, radius=m_safe_r),
+                _make_obs("camera-01", 2, l_px1, t_mono=t, radius=l_safe_r),
+            ],
+            t_mono=t,
+        )
+        det2 = _make_frame_det(
+            "camera-02",
+            [
+                _make_obs("camera-02", 9, m_px2, t_mono=t, radius=m_safe_r),
+                _make_obs("camera-02", 4, l_px2, t_mono=t, radius=l_safe_r),
+            ],
+            t_mono=t,
+        )
+        res = tracker.process(det1, det2, true_calib)
+
+    assert res.status == STEREO_STATUS_OK
+    assert len(res.drones) == 2
+    models = {d.drone_model for d in res.drones}
+    assert models == {"drone model A", "drone model B"}
+
+    # Auto-calibrate from the recorded flight trajectories without a checkerboard or tape measure!
+    auto_calib = tracker.auto_calibrate_from_trajectories(focal_px=900.0, fallback_baseline_m=1.0)
+    assert auto_calib.calibration_type == "auto"
+    assert auto_calib.baseline_m == pytest.approx(1.50, rel=0.05)
+
+    # Test monocular_fallback when Camera 2 is disconnected (det_02=None)
+    tracker.monocular_fallback = True
+    mono_res = tracker.process(det1, None, true_calib)
+    assert mono_res.status == STEREO_STATUS_MONOCULAR
+    assert len(mono_res.drones) == 2
+    assert {d.drone_model for d in mono_res.drones} == {"drone model A", "drone model B"}
+    assert all(d.estimation_mode == "monocular" for d in mono_res.drones)
+
