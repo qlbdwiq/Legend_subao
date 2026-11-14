@@ -110,7 +110,7 @@ jobs:
           test -s mobile-dist/drone-camera-android-v0.4.0-debug.apk
           test -s mobile-dist/drone-camera-ios-v0.4.0-unsigned.ipa
           test -s mobile-dist/drone-camera-ios-v0.4.0-xcode-project.zip
-          title="$(sed -n 's/^# //p;T;q' "docs/releases/v$VERSION.md")"
+          title="$(awk '/^# / {sub(/^# /, ""); print; exit}' "docs/releases/v$VERSION.md")"
           if [[ "$RELEASE_TAG" == phase-* ]]; then
             title="Phase $PHASE - $title"
           fi
