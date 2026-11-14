@@ -51,7 +51,7 @@ jobs:
       - name: Syntax and module imports
         run: |
           python -m compileall -q src
-          python -c "import sys; sys.path.insert(0, 'src'); import cv2, numpy, PySide6, torch, torchvision, ultralytics, lap; import drone_camera.config, drone_camera.capture, drone_camera.gui, drone_camera.engine, drone_camera.ai_pipeline"
+          python -c "import sys; sys.path.insert(0, 'src'); import cv2, numpy, PySide6, torch, torchvision, ultralytics, lap; import drone_camera.config, drone_camera.capture, drone_camera.gui, drone_camera.engine, drone_camera.ai_pipeline, drone_camera.calibration, drone_camera.stereo_3d, drone_camera.collision, drone_camera.recorder, drone_camera.dashboard_widgets"
       - name: Validate example configuration
         run: python src/main.py --validate-config config.example.json
       # real_model tests need the trained best.pt, which is not in the repository: they are skipped
