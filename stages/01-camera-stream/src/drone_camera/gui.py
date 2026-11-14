@@ -19,7 +19,8 @@ from .ai_settings import (
     save_ai_settings, settings_path_for,
 )
 from .calibration import (
-    CalibrationError, StereoCalibration, calibration_path_for,
+    DRONE_SIZE_PRESETS, CalibrationError, StereoCalibration,
+    auto_calibrate_from_scene_frames, calibration_path_for,
     create_synthetic_calibration, load_calibration, save_calibration,
 )
 from .capabilities import (
@@ -659,13 +660,46 @@ class MainWindow(QMainWindow):
         col.addLayout(calib_btns_1)
 
         calib_btns_2 = QHBoxLayout()
+        btn_quick_layout = QPushButton("상·하/좌·우 간편 보정 (체커보드 없음)")
+        btn_quick_layout.clicked.connect(self.apply_quick_layout_calibration)
+        btn_auto_scene = QPushButton("배경 특징점 자동 보정")
+        btn_auto_scene.clicked.connect(self.apply_auto_scene_calibration)
+        btn_auto_traj = QPushButton("드론 궤적 자동 보정")
+        btn_auto_traj.clicked.connect(self.apply_auto_trajectory_calibration)
+        for b in (btn_quick_layout, btn_auto_scene, btn_auto_traj):
+            calib_btns_2.addWidget(b)
+        col.addLayout(calib_btns_2)
+
+        calib_btns_3 = QHBoxLayout()
         btn_synth = QPushButton("합성 보정 적용 (실험 전 검증용)")
         btn_synth.clicked.connect(self.apply_quick_synthetic_calibration)
         btn_clear_cal = QPushButton("보정 해제 (미보정 전환)")
         btn_clear_cal.clicked.connect(self.clear_calibration)
-        calib_btns_2.addWidget(btn_synth)
-        calib_btns_2.addWidget(btn_clear_cal)
-        col.addLayout(calib_btns_2)
+        calib_btns_3.addWidget(btn_synth)
+        calib_btns_3.addWidget(btn_clear_cal)
+        col.addLayout(calib_btns_3)
+
+        # Drone Preset (Mavic 3 + Lito X1), Camera Layout (Vertical/Horizontal), & Monocular Fallback
+        preset_row = QHBoxLayout()
+        self.camera_layout_combo = QComboBox()
+        self.camera_layout_combo.addItem("상·하 배치 (위 Cam1·아래 Cam2)", "vertical")
+        self.camera_layout_combo.addItem("좌·우 배치 (좌 Cam1·우 Cam2)", "horizontal")
+        self.drone_preset_combo = QComboBox()
+        for preset_key, (preset_label, _p_m, _s_m) in DRONE_SIZE_PRESETS.items():
+            self.drone_preset_combo.addItem(preset_label, preset_key)
+        self.drone_preset_combo.currentIndexChanged.connect(self._drone_preset_changed)
+        preset_row.addWidget(QLabel("배치:"))
+        preset_row.addWidget(self.camera_layout_combo)
+        preset_row.addWidget(QLabel("기체:"))
+        preset_row.addWidget(self.drone_preset_combo, 1)
+        col.addLayout(preset_row)
+
+        self.monocular_fallback_check = QCheckBox(
+            "카메라 단안 거리 예측 보조 (한쪽 카메라만 잡혀도 매빅3·리토X1 크기로 3D 추정)"
+        )
+        self.monocular_fallback_check.setChecked(self.stereo_tracker.monocular_fallback)
+        self.monocular_fallback_check.toggled.connect(self._monocular_fallback_toggled)
+        col.addWidget(self.monocular_fallback_check)
 
         # Collision threshold controls
         thresh_group = QGroupBox("충돌 위험 임계값 및 경고 설정")
@@ -965,6 +999,50 @@ class MainWindow(QMainWindow):
         calib = create_synthetic_calibration()
         self.set_calibration(calib, persist=True)
 
+    def apply_quick_layout_calibration(self) -> None:
+        cam_layout = self.camera_layout_combo.currentData() if hasattr(self, "camera_layout_combo") else "vertical"
+        baseline = self.calibration.baseline_m if self.calibration is not None else 1.5
+        calib = create_synthetic_calibration(
+            baseline_m=baseline,
+            layout=cam_layout or "vertical",
+            calibration_type="auto",
+        )
+        self.set_calibration(calib, persist=True)
+
+    def apply_auto_scene_calibration(self) -> None:
+        f1, f2 = self._latest_frames[0], self._latest_frames[1]
+        if f1 is None or f2 is None:
+            QMessageBox.warning(
+                self,
+                "배경 특징점 자동 보정",
+                "두 카메라가 모두 연결되어 같은 배경을 비추고 있어야 합니다.",
+            )
+            return
+        try:
+            baseline = self.calibration.baseline_m if self.calibration is not None else 1.5
+            calib = auto_calibrate_from_scene_frames(f1.image, f2.image, baseline_m=baseline)
+            self.set_calibration(calib, persist=True)
+        except CalibrationError as exc:
+            QMessageBox.warning(self, "배경 특징점 자동 보정 오류", str(exc))
+
+    def apply_auto_trajectory_calibration(self) -> None:
+        try:
+            baseline = self.calibration.baseline_m if self.calibration is not None else 1.5
+            calib = self.stereo_tracker.auto_calibrate_from_trajectories(fallback_baseline_m=baseline)
+            self.set_calibration(calib, persist=True)
+        except (CalibrationError, ValueError) as exc:
+            QMessageBox.warning(self, "드론 궤적 자동 보정 안내", str(exc))
+
+    def _drone_preset_changed(self, *_) -> None:
+        preset = self.drone_preset_combo.currentData()
+        if preset in DRONE_SIZE_PRESETS:
+            self.stereo_tracker.drone_preset = preset
+            self.refresh()
+
+    def _monocular_fallback_toggled(self, checked: bool) -> None:
+        self.stereo_tracker.monocular_fallback = bool(checked)
+        self.refresh()
+
     def clear_calibration(self) -> None:
         self.set_calibration(None, persist=True)
 
@@ -972,9 +1050,16 @@ class MainWindow(QMainWindow):
         dialog = CalibrationWizardDialog(
             self.calibration,
             frame_provider=lambda: (self._latest_frames[0], self._latest_frames[1]),
+            stereo_tracker=self.stereo_tracker,
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_calibration is not None:
+            if hasattr(self, "drone_preset_combo"):
+                idx = self.drone_preset_combo.findData(self.stereo_tracker.drone_preset)
+                if idx >= 0:
+                    self.drone_preset_combo.blockSignals(True)
+                    self.drone_preset_combo.setCurrentIndex(idx)
+                    self.drone_preset_combo.blockSignals(False)
             self.set_calibration(dialog.result_calibration, persist=True)
 
     def choose_calibration_file(self) -> None:
@@ -1298,6 +1383,11 @@ class MainWindow(QMainWindow):
             calib_txt = "미보정 (3D 미출력)"
         elif self.calibration.calibration_type == "synthetic":
             calib_txt = f"합성 보정 [실험용] · 기준선 {self.calibration.baseline_m:.2f} m"
+        elif self.calibration.calibration_type == "auto":
+            calib_txt = (
+                f"자동 보정 [체커보드 없음] · 기준선 {self.calibration.baseline_m:.2f} m · "
+                f"RMS {self.calibration.rms_error:.2f} px"
+            )
         else:
             calib_txt = (
                 f"현장 보정 완료 · 기준선 {self.calibration.baseline_m:.2f} m · "
@@ -1335,8 +1425,10 @@ class MainWindow(QMainWindow):
             for k in collision.kinematics:
                 x, y, z = k.xyz_m
                 vx, vy, vz = k.velocity_mps
+                model_str = f" ({k.drone_model})" if getattr(k, "drone_model", "unknown") not in ("", "unknown") else ""
+                mode_str = "단안 크기추정 3D" if getattr(k, "estimation_mode", "stereo") == "monocular" else "스테레오 3D"
                 lines.append(
-                    f"드론 #{k.drone_id} [Cam1 ID:{k.cam1_track_id} ↔ Cam2 ID:{k.cam2_track_id}]\n"
+                    f"드론 #{k.drone_id}{model_str} [{mode_str} · Cam1 ID:{k.cam1_track_id} ↔ Cam2 ID:{k.cam2_track_id}]\n"
                     f"  위치(X,Y,Z): ({x:+.2f}, {y:+.2f}, {z:.2f}) m  (±{k.position_uncertainty_m:.2f} m)\n"
                     f"  속도(Vx,Vy,Vz): ({vx:+.2f}, {vy:+.2f}, {vz:+.2f}) m/s · {k.direction_label}\n"
                     f"  신뢰도: {k.confidence_score * 100:.0f}% · 재투영 오차: {k.reprojection_error_px:.2f} px"
@@ -1358,7 +1450,12 @@ class MainWindow(QMainWindow):
             )
         else:
             c = self.calibration
-            tag = "합성 보정 (소프트웨어 검증용)" if c.calibration_type == "synthetic" else "현장 실측 보정"
+            if c.calibration_type == "synthetic":
+                tag = "합성 보정 (소프트웨어 검증용)"
+            elif c.calibration_type == "auto":
+                tag = f"자동 보정 (체커보드 없음 · {c.notes})"
+            else:
+                tag = "현장 실측 보정"
             self._set_text_if_changed(
                 self.calib_detail_label,
                 f"보정 유형: {tag}\n"

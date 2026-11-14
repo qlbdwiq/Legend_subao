@@ -19,7 +19,12 @@ import cv2
 import numpy as np
 
 from .calibration import (
+    DRONE_SIZE_PRESETS,
+    LITO_X1_SPAN_M,
+    MAVIC_3_SPAN_M,
+    CameraIntrinsics,
     StereoCalibration,
+    calibrate_from_matched_points,
     project_points_3d,
     undistort_point_px,
     undistort_points_normalized,
@@ -33,6 +38,7 @@ STEREO_STATUS_UNSYNCHRONIZED = "unsynchronized"
 STEREO_STATUS_NO_MATCH = "no_match"
 STEREO_STATUS_AMBIGUOUS = "ambiguous_match"
 STEREO_STATUS_PARTIAL = "partial_match"
+STEREO_STATUS_MONOCULAR = "monocular_fallback"
 STEREO_STATUS_OK = "ok"
 
 
@@ -87,6 +93,9 @@ class Drone3DPose:
     detector_confidence: float
     timestamp: float                   # Fused monotonic timestamp (s)
     wall_time: float                   # Fused wall-clock timestamp (s)
+    drone_model: str = "unknown"       # e.g. "DJI Mavic 3", "Lito X1", or "unknown"
+    estimation_mode: str = "stereo"    # "stereo" (2-camera triangulation) or "monocular" (1-camera size-based)
+    estimated_span_m: float = 0.0      # Estimated physical diagonal span (m) from stereo depth & pixel size
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -370,6 +379,59 @@ def triangulate_points(
     )
 
 
+def identify_drone_model(
+    estimated_span_m: float,
+    preset_key: str = "mavic3_litox1",
+) -> tuple[str, float]:
+    """Identify drone model label and reference physical span (m) from estimated size and preset."""
+    if preset_key == "mavic3":
+        return "DJI Mavic 3", MAVIC_3_SPAN_M
+    if preset_key == "litox1":
+        return "Lito X1", LITO_X1_SPAN_M
+    if preset_key == "mavic_mini":
+        return "DJI Mavic Mini", 0.24
+    # Default heterogeneous pair: DJI Mavic 3 (0.38m) + Lito X1 (0.18m), geometric midpoint ~ 0.26m
+    if estimated_span_m >= 0.26:
+        return "DJI Mavic 3", MAVIC_3_SPAN_M
+    return "Lito X1", LITO_X1_SPAN_M
+
+
+def estimate_monocular_3d_point(
+    center_px: tuple[float, float],
+    base_radius_px: float,
+    intrinsics: CameraIntrinsics,
+    real_size_m: float,
+    detector_confidence: float = 0.85,
+) -> TriangulatedPoint | None:
+    """Estimate 3D position (X, Y, Z) in meters from a single camera using known physical drone span."""
+    diam_px = max(2.0, 2.0 * float(base_radius_px))
+    if not math.isfinite(diam_px) or real_size_m <= 0.02:
+        return None
+    f_eff = math.sqrt(float(intrinsics.fx) * float(intrinsics.fy))
+    z_m = (f_eff * float(real_size_m)) / diam_px
+    if not (0.15 <= z_m <= 250.0):
+        return None
+    norm_xy = undistort_points_normalized([(float(center_px[0]), float(center_px[1]))], intrinsics)[0]
+    x_m = float(norm_xy[0]) * z_m
+    y_m = float(norm_xy[1]) * z_m
+    uncertainty_m = max(0.08, (z_m / diam_px) * 2.5 + 0.06 * z_m)
+    conf_clamped = max(0.0, min(1.0, float(detector_confidence)))
+    conf_score = float(np.clip(0.50 + 0.28 * conf_clamped, 0.35, 0.82))
+    return TriangulatedPoint(
+        xyz_m=(x_m, y_m, float(z_m)),
+        depth_cam1_m=float(z_m),
+        depth_cam2_m=float(z_m),
+        reprojection_error_px=0.0,
+        reproj_error_cam1_px=0.0,
+        reproj_error_cam2_px=0.0,
+        epipolar_error_px=0.0,
+        ray_gap_m=0.0,
+        parallax_deg=0.0,
+        position_uncertainty_m=float(uncertainty_m),
+        confidence_score=conf_score,
+    )
+
+
 # ------------------------------------ cross-camera matching & 3D track state
 @dataclass
 class _Active3DTrack:
@@ -383,11 +445,21 @@ class _Active3DTrack:
 class StereoTracker3D:
     """Matches drones across two cameras, rejects ambiguous correspondences, and
     maintains persistent 3D drone IDs without assuming per-camera ByteTrack IDs match.
+    Also supports trajectory-based auto-calibration and monocular size-based 3D fallback
+    for DJI Mavic 3 (0.38 m) and Lito X1 (0.18 m).
     """
 
-    def __init__(self, max_track_Coast_s: float = 1.5, max_3d_jump_m: float = 8.0):
+    def __init__(
+        self,
+        max_track_Coast_s: float = 1.5,
+        max_3d_jump_m: float = 8.0,
+        drone_preset: str = "mavic3_litox1",
+        monocular_fallback: bool = False,
+    ):
         self.max_track_coast_s = float(max_track_Coast_s)
         self.max_3d_jump_m = float(max_3d_jump_m)
+        self.drone_preset = drone_preset if drone_preset in DRONE_SIZE_PRESETS else "mavic3_litox1"
+        self.monocular_fallback = bool(monocular_fallback)
         self._tracks: list[_Active3DTrack] = []
         self._next_drone_id = 1
         # Per-camera previous observation cache for sub-frame 2D velocity interpolation:
@@ -396,12 +468,94 @@ class StereoTracker3D:
             "camera-01": {},
             "camera-02": {},
         }
+        # Trajectory samples for checkerboard-free drone flight auto-calibration:
+        # list of (center1_xy, center2_xy, diam_px_01, real_size_m)
+        self.trajectory_samples: list[tuple[tuple[float, float], tuple[float, float], float, float]] = []
+        self._last_image_size_01: tuple[int, int] = (1280, 720)
+        self._last_image_size_02: tuple[int, int] = (1280, 720)
 
     def reset(self) -> None:
         self._tracks.clear()
         self._next_drone_id = 1
         self._cam_prev["camera-01"].clear()
         self._cam_prev["camera-02"].clear()
+
+    def clear_trajectory_samples(self) -> None:
+        self.trajectory_samples.clear()
+
+    def _record_trajectory_samples(
+        self,
+        det_01: FrameDetections | None,
+        det_02: FrameDetections | None,
+    ) -> None:
+        """Record paired drone 2D centers + pixel spans for checkerboard-free trajectory auto-calibration."""
+        if det_01 is None or det_02 is None:
+            return
+        if abs(det_01.received_monotonic - det_02.received_monotonic) > 0.15:
+            return
+        self._last_image_size_01 = det_01.image_size
+        self._last_image_size_02 = det_02.image_size
+        obs_1 = det_01.observations
+        obs_2 = det_02.observations
+        if not obs_1 or not obs_2:
+            return
+
+        _label, primary_size_m, secondary_size_m = DRONE_SIZE_PRESETS.get(
+            self.drone_preset, DRONE_SIZE_PRESETS["mavic3_litox1"]
+        )
+        candidate_pairs: list[tuple[DroneObservation, DroneObservation, float]] = []
+        if len(obs_1) == 1 and len(obs_2) == 1:
+            candidate_pairs.append((obs_1[0], obs_2[0], primary_size_m))
+        elif len(obs_1) == 2 and len(obs_2) == 2 and self.drone_preset == "mavic3_litox1":
+            # Sort descending by 2D base_radius: larger = DJI Mavic 3 (0.38m), smaller = Lito X1 (0.18m)
+            s1 = sorted(obs_1, key=lambda o: o.base_radius, reverse=True)
+            s2 = sorted(obs_2, key=lambda o: o.base_radius, reverse=True)
+            if s1[1].base_radius > 1.0 and s2[1].base_radius > 1.0:
+                if (s1[0].base_radius / s1[1].base_radius) >= 1.25 and (s2[0].base_radius / s2[1].base_radius) >= 1.25:
+                    candidate_pairs.append((s1[0], s2[0], MAVIC_3_SPAN_M))
+                    candidate_pairs.append((s1[1], s2[1], LITO_X1_SPAN_M))
+
+        for o1, o2, real_m in candidate_pairs:
+            if self.trajectory_samples:
+                last_c1 = self.trajectory_samples[-1][0]
+                if math.dist(o1.center, last_c1) < 6.0:
+                    continue
+            self.trajectory_samples.append((o1.center, o2.center, 2.0 * o1.base_radius, real_m))
+            if len(self.trajectory_samples) > 300:
+                self.trajectory_samples.pop(0)
+
+    def auto_calibrate_from_trajectories(
+        self,
+        focal_px: float = 900.0,
+        fallback_baseline_m: float = 1.5,
+        time_offset_s: float = 0.0,
+        max_sync_delta_s: float = 0.10,
+    ) -> StereoCalibration:
+        """Compute full StereoCalibration (R, T, and drone-size-scaled baseline_m) from recorded drone trajectories."""
+        if len(self.trajectory_samples) < 8:
+            raise ValueError(
+                f"드론 궤적 샘플이 부족합니다 ({len(self.trajectory_samples)}/8개). "
+                "드론을 띄워 두 카메라 화면 안에서 조금 더 움직인 뒤 다시 시도하세요."
+            )
+        pts1 = np.array([s[0] for s in self.trajectory_samples], dtype=np.float64)
+        pts2 = np.array([s[1] for s in self.trajectory_samples], dtype=np.float64)
+        diams = [s[2] for s in self.trajectory_samples]
+        sizes = [s[3] for s in self.trajectory_samples]
+        preset_label = DRONE_SIZE_PRESETS.get(self.drone_preset, DRONE_SIZE_PRESETS["mavic3_litox1"])[0]
+        return calibrate_from_matched_points(
+            pts1,
+            pts2,
+            image_size_01=self._last_image_size_01,
+            image_size_02=self._last_image_size_02,
+            focal_px=focal_px,
+            baseline_m=fallback_baseline_m,
+            drone_diameters_px_01=diams,
+            drone_real_sizes_m=sizes,
+            calibration_type="auto",
+            time_offset_s=time_offset_s,
+            max_sync_delta_s=max_sync_delta_s,
+            notes=f"드론 비행 궤적 및 기체 크기({preset_label}) 기반 자동 보정",
+        )
 
     def _update_2d_velocities_and_interpolate(
         self,
@@ -477,6 +631,67 @@ class StereoTracker3D:
         used_ids.add(drone_id)
         return drone_id
 
+    def _build_monocular_poses_from_cam1(
+        self,
+        obs_list: list[DroneObservation],
+        calibration: StereoCalibration,
+        t_ref: float,
+        wall_ref: float,
+        used_global_ids: set[int],
+    ) -> list[Drone3DPose]:
+        """Estimate 3D poses from Camera 1 observations using Mavic 3 (0.38m) / Lito X1 (0.18m) physical spans."""
+        if not obs_list:
+            return []
+        _label, primary_m, secondary_m = DRONE_SIZE_PRESETS.get(
+            self.drone_preset, DRONE_SIZE_PRESETS["mavic3_litox1"]
+        )
+        # If 2 drones are visible in Cam1 under mavic3_litox1, larger pixel radius -> Mavic 3, smaller -> Lito X1
+        sorted_by_size = sorted(range(len(obs_list)), key=lambda idx: obs_list[idx].base_radius, reverse=True)
+        assigned_models: dict[int, tuple[str, float]] = {}
+        if len(obs_list) >= 2 and self.drone_preset == "mavic3_litox1":
+            assigned_models[sorted_by_size[0]] = ("DJI Mavic 3", MAVIC_3_SPAN_M)
+            for idx in sorted_by_size[1:]:
+                assigned_models[idx] = ("Lito X1", LITO_X1_SPAN_M)
+        else:
+            model_name = "DJI Mavic 3" if primary_m >= 0.30 else ("Lito X1" if primary_m <= 0.20 else "DJI Mavic Mini")
+            for idx in range(len(obs_list)):
+                assigned_models[idx] = (model_name, primary_m)
+
+        mono_poses: list[Drone3DPose] = []
+        for idx, o1 in enumerate(obs_list):
+            m_name, real_m = assigned_models[idx]
+            tri = estimate_monocular_3d_point(
+                o1.center, o1.base_radius, calibration.camera_01, real_m, detector_confidence=o1.confidence
+            )
+            if tri is None:
+                continue
+            drone_id = self._assign_global_drone_id(tri.xyz_m, o1.track_id, None, t_ref, used_global_ids)
+            mono_poses.append(
+                Drone3DPose(
+                    drone_id=drone_id,
+                    cam1_track_id=o1.track_id,
+                    cam2_track_id=None,
+                    cam1_center=o1.center,
+                    cam2_center=o1.center,
+                    cam1_safe_radius_px=o1.safe_radius,
+                    cam2_safe_radius_px=0.0,
+                    xyz_m=tri.xyz_m,
+                    reprojection_error_px=0.0,
+                    epipolar_error_px=0.0,
+                    ray_gap_m=0.0,
+                    parallax_deg=0.0,
+                    position_uncertainty_m=tri.position_uncertainty_m,
+                    confidence_score=tri.confidence_score,
+                    detector_confidence=o1.confidence,
+                    timestamp=t_ref,
+                    wall_time=wall_ref,
+                    drone_model=m_name,
+                    estimation_mode="monocular",
+                    estimated_span_m=real_m,
+                )
+            )
+        return mono_poses
+
     def process(
         self,
         det_01: FrameDetections | None,
@@ -485,16 +700,17 @@ class StereoTracker3D:
         now_monotonic: float | None = None,
     ) -> StereoFrameResult:
         """Compute synchronized, cross-camera matched 3D drone coordinates."""
+        self._record_trajectory_samples(det_01, det_02)
         sync = evaluate_frame_sync(det_01, det_02, calibration, now_monotonic=now_monotonic)
         t_ref = (
             0.5 * (det_01.received_monotonic + det_02.received_monotonic + (calibration.time_offset_s if calibration else 0.0))
             if (det_01 is not None and det_02 is not None)
-            else (now_monotonic or 0.0)
+            else (det_01.received_monotonic if det_01 is not None else (now_monotonic or 0.0))
         )
         wall_ref = (
             0.5 * (det_01.received_at + det_02.received_at)
             if (det_01 is not None and det_02 is not None)
-            else 0.0
+            else (det_01.received_at if det_01 is not None else 0.0)
         )
 
         if calibration is None:
@@ -509,6 +725,23 @@ class StereoTracker3D:
             )
 
         if det_01 is None or det_02 is None:
+            if self.monocular_fallback and det_01 is not None and det_01.observations:
+                used_ids: set[int] = set()
+                mono_poses = self._build_monocular_poses_from_cam1(
+                    list(det_01.observations), calibration, t_ref, wall_ref, used_ids
+                )
+                if mono_poses:
+                    mono_sync = SyncStatus(True, 0.0, 0.0, 0.0, calibration.time_offset_s, calibration.max_sync_delta_s, "단안 크기 기반 거리 예측")
+                    return StereoFrameResult(
+                        status=STEREO_STATUS_MONOCULAR,
+                        status_message=f"{len(mono_poses)}대 단안 크기추정 3D (매빅3/리토X1 크기 기반)",
+                        is_calibrated=True,
+                        calibration_type=calibration.calibration_type,
+                        sync=mono_sync,
+                        timestamp=t_ref,
+                        wall_time=wall_ref,
+                        drones=tuple(mono_poses),
+                    )
             return StereoFrameResult(
                 status=STEREO_STATUS_WAITING,
                 status_message=sync.reason,
@@ -538,6 +771,22 @@ class StereoTracker3D:
         obs_1 = det_01.observations
         obs_2 = det_02.observations
         if not obs_1 or not obs_2:
+            if self.monocular_fallback and obs_1 and not obs_2:
+                used_ids: set[int] = set()
+                mono_poses = self._build_monocular_poses_from_cam1(
+                    list(obs_1), calibration, t_ref, wall_ref, used_ids
+                )
+                if mono_poses:
+                    return StereoFrameResult(
+                        status=STEREO_STATUS_MONOCULAR,
+                        status_message=f"{len(mono_poses)}대 단안 크기추정 3D (Cam1 단독)",
+                        is_calibrated=True,
+                        calibration_type=calibration.calibration_type,
+                        sync=sync,
+                        timestamp=t_ref,
+                        wall_time=wall_ref,
+                        drones=tuple(mono_poses),
+                    )
             return StereoFrameResult(
                 status=STEREO_STATUS_WAITING if (not obs_1 and not obs_2) else STEREO_STATUS_NO_MATCH,
                 status_message=(
@@ -639,12 +888,35 @@ class StereoTracker3D:
 
         used_global_ids: set[int] = set()
         poses: list[Drone3DPose] = []
+        f_eff_1 = math.sqrt(float(calibration.camera_01.fx) * float(calibration.camera_01.fy))
         # Sort matched pairs by X coordinate for deterministic initial ID ordering
         matched_sorted = sorted(matched_pairs, key=lambda pair: filtered_candidates[pair][1].xyz_m[0])
+
+        # Compute estimated physical spans from stereo depth and 2D pixel diagonal
+        raw_entries = []
         for i, j in matched_sorted:
             _cost, tri = filtered_candidates[(i, j)]
             o1, center1 = comp_1[i]
             o2, center2 = comp_2[j]
+            est_span_m = (2.0 * float(o1.base_radius) * float(tri.depth_cam1_m)) / max(1.0, f_eff_1)
+            raw_entries.append((i, j, o1, center1, o2, center2, tri, est_span_m))
+
+        # Assign drone model labels (e.g. DJI Mavic 3 vs Lito X1)
+        model_labels: list[str] = []
+        if len(raw_entries) == 2 and self.drone_preset == "mavic3_litox1":
+            # In a Mavic 3 + Lito X1 pair, if their estimated physical spans differ by >=15%,
+            # assign the physically larger one to DJI Mavic 3 and smaller to Lito X1.
+            span_0, span_1 = raw_entries[0][7], raw_entries[1][7]
+            if abs(span_0 - span_1) >= 0.04:
+                if span_0 >= span_1:
+                    model_labels = ["DJI Mavic 3", "Lito X1"]
+                else:
+                    model_labels = ["Lito X1", "DJI Mavic 3"]
+        if not model_labels:
+            model_labels = [identify_drone_model(e[7], self.drone_preset)[0] for e in raw_entries]
+
+        matched_i_set = {e[0] for e in raw_entries}
+        for idx, (i, j, o1, center1, o2, center2, tri, est_span_m) in enumerate(raw_entries):
             drone_id = self._assign_global_drone_id(
                 tri.xyz_m, o1.track_id, o2.track_id, t_ref, used_global_ids
             )
@@ -667,20 +939,34 @@ class StereoTracker3D:
                     detector_confidence=0.5 * (o1.confidence + o2.confidence),
                     timestamp=t_ref,
                     wall_time=wall_ref,
+                    drone_model=model_labels[idx],
+                    estimation_mode="stereo",
+                    estimated_span_m=round(est_span_m, 3),
                 )
             )
+
+        if self.monocular_fallback and ambiguous_count == 0 and len(matched_i_set) < n1:
+            rem_obs = [comp_1[i][0] for i in range(n1) if i not in matched_i_set]
+            poses.extend(
+                self._build_monocular_poses_from_cam1(rem_obs, calibration, t_ref, wall_ref, used_global_ids)
+            )
+
         poses.sort(key=lambda d: d.drone_id)
-        unmatched_1 = n1 - len(poses)
-        unmatched_2 = n2 - len(poses)
+        unmatched_1 = max(0, n1 - len(poses))
+        unmatched_2 = max(0, n2 - len(matched_pairs))
         if ambiguous_count > 0:
             status = STEREO_STATUS_AMBIGUOUS
             msg = f"{len(poses)}대 3D 확정 · {ambiguous_count}쌍 대응 불확실(제외됨)"
-        elif unmatched_1 > 0 or unmatched_2 > 0:
+        elif unmatched_1 > 0 or (unmatched_2 > 0 and not self.monocular_fallback):
             status = STEREO_STATUS_PARTIAL
             msg = f"{len(poses)}대 3D 확정 (미대응 Cam1: {unmatched_1}, Cam2: {unmatched_2})"
         else:
             status = STEREO_STATUS_OK
-            calib_tag = "합성 보정(실험용)" if calibration.calibration_type == "synthetic" else "현장 보정"
+            calib_tag = (
+                "합성 보정(실험용)"
+                if calibration.calibration_type == "synthetic"
+                else ("자동 보정" if calibration.calibration_type == "auto" else "현장 보정")
+            )
             msg = f"{len(poses)}대 3D 좌표 확정 ({calib_tag})"
 
         return StereoFrameResult(

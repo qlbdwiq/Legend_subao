@@ -236,11 +236,20 @@ def test_threshold_controls_persist_and_calibration_wizard_works(qapp, tmp_path,
     assert wizard.result_calibration is not None
     assert wizard.result_calibration.calibration_type == "synthetic"
     assert wizard.result_calibration.rms_error < 0.1
+
+    wizard.apply_quick_layout_preset()
+    assert wizard.result_calibration.calibration_type == "auto"
     wizard.close()
 
     # Check threshold spinboxes in MainWindow save to collision_settings.json
     window = MainWindow(defaults(), tmp_path / "config.json")
     try:
+        window.apply_quick_layout_calibration()
+        assert window.calibration is not None
+        assert window.calibration.calibration_type == "auto"
+        window.monocular_fallback_check.setChecked(True)
+        assert window.stereo_tracker.monocular_fallback is True
+
         window.warn_dist_spin.setValue(7.5)
         window.danger_dist_spin.setValue(3.2)
         window.horizon_spin.setValue(6.0)
