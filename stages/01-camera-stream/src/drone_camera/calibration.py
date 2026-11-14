@@ -22,14 +22,16 @@ CALIBRATION_FILE_NAME = "stereo_calibration.json"
 CALIBRATION_TYPES = ("field", "auto", "synthetic")
 CAMERA_LAYOUTS = ("horizontal", "vertical")
 
-# Physical diagonal span (meters) for camera-based distance & scale estimation
-MAVIC_3_SPAN_M = 0.38   # drone model A diagonal wheelbase / visual span (~configured size A)
-LITO_X1_SPAN_M = 0.18   # drone model B compact drone visual span (~configured size B)
+# Physical diagonal/unfolded span (meters) for camera-based distance & scale estimation
+# DJI Mavic 3: 347.5 x 283 x 107.7 mm unfolded, 380.1 mm diagonal wheelbase
+# DJI Lito X1: 183.3 x 251.3 x 79.4 mm unfolded (18.3 cm length x 25.1 cm width; 144.4 x 93.9 x 62.4 mm folded)
+MAVIC_3_SPAN_M = 0.380
+LITO_X1_SPAN_M = 0.251
 
 DRONE_SIZE_PRESETS: dict[str, tuple[str, float, float]] = {
-    "mavic3_litox1": ("drone model A (configured size A) + drone model B (configured size B)", MAVIC_3_SPAN_M, LITO_X1_SPAN_M),
-    "mavic3": ("drone model A (configured size A)", MAVIC_3_SPAN_M, MAVIC_3_SPAN_M),
-    "litox1": ("drone model B (configured size B)", LITO_X1_SPAN_M, LITO_X1_SPAN_M),
+    "mavic3_litox1": ("drone model A (38.0cm) + drone model B (25.1cm / 길이 18.3cm)", MAVIC_3_SPAN_M, LITO_X1_SPAN_M),
+    "mavic3": ("drone model A (38.0cm)", MAVIC_3_SPAN_M, MAVIC_3_SPAN_M),
+    "litox1": ("drone model B (25.1cm / 길이 18.3cm)", LITO_X1_SPAN_M, LITO_X1_SPAN_M),
     "mavic_mini": ("drone (24cm)", 0.24, 0.24),
 }
 

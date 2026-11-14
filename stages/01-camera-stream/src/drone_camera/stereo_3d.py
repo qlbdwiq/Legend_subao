@@ -390,8 +390,8 @@ def identify_drone_model(
         return "drone model B", LITO_X1_SPAN_M
     if preset_key == "mavic_mini":
         return "drone", 0.24
-    # Default heterogeneous pair: drone model A (0.38m) + drone model B (0.18m), geometric midpoint ~ 0.26m
-    if estimated_span_m >= 0.26:
+    # Default heterogeneous pair: drone model A (0.380m) + drone model B (0.251m), midpoint ~ 0.31m
+    if estimated_span_m >= 0.31:
         return "drone model A", MAVIC_3_SPAN_M
     return "drone model B", LITO_X1_SPAN_M
 
@@ -507,11 +507,11 @@ class StereoTracker3D:
         if len(obs_1) == 1 and len(obs_2) == 1:
             candidate_pairs.append((obs_1[0], obs_2[0], primary_size_m))
         elif len(obs_1) == 2 and len(obs_2) == 2 and self.drone_preset == "mavic3_litox1":
-            # Sort descending by 2D base_radius: larger = drone model A (0.38m), smaller = drone model B (0.18m)
+            # Sort descending by 2D base_radius: larger = drone model A (0.380m), smaller = drone model B (0.251m)
             s1 = sorted(obs_1, key=lambda o: o.base_radius, reverse=True)
             s2 = sorted(obs_2, key=lambda o: o.base_radius, reverse=True)
             if s1[1].base_radius > 1.0 and s2[1].base_radius > 1.0:
-                if (s1[0].base_radius / s1[1].base_radius) >= 1.25 and (s2[0].base_radius / s2[1].base_radius) >= 1.25:
+                if (s1[0].base_radius / s1[1].base_radius) >= 1.18 and (s2[0].base_radius / s2[1].base_radius) >= 1.18:
                     candidate_pairs.append((s1[0], s2[0], MAVIC_3_SPAN_M))
                     candidate_pairs.append((s1[1], s2[1], LITO_X1_SPAN_M))
 
