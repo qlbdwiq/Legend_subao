@@ -34,7 +34,7 @@ CI matrix: windows-latest와 macos-latest 각각 Python 3.11/3.12, macos-15-inte
 
 ## 추가 실장비 검증 및 다음 단계
 
-iPhone 15 Pro와 두 번째 iOS/Android 장치의 앱·직접 URL·코덱·권한, USB 드라이버, 실제 운영체제,
+iOS 또는 Android 장치 두 대의 앱·직접 URL·코덱·권한, USB 드라이버, 실제 운영체제,
 Wi-Fi 단절·복구, 장시간 지연·720p30 두 채널 CPU 부하를 확인해야 합니다.
 수신 시각은 촬영 시각이 아니며 카메라 동기화는 아직 없습니다.
 다음 작업은 YOLO 드론 인식·추적이고 이후 카메라 보정·3D 추적, 충돌 경고, 대시보드 순입니다.
